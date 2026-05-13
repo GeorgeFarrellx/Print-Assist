@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import shutil
+import sys
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
@@ -76,6 +78,7 @@ class PreviewWindow:
         self.prev_btn.pack(side=tk.LEFT, padx=4, pady=4)
         self.next_btn.pack(side=tk.LEFT, padx=4, pady=4)
         ttk.Button(buttons, text="Save Final PDF", command=self.save_final_pdf).pack(side=tk.RIGHT, padx=4, pady=4)
+        ttk.Button(buttons, text="Print Preview PDF", command=self.print_preview_pdf).pack(side=tk.RIGHT, padx=4, pady=4)
         ttk.Button(buttons, text="Open Preview Externally", command=self.open_preview_externally).pack(side=tk.RIGHT, padx=4, pady=4)
         ttk.Button(buttons, text="Close", command=self.close).pack(side=tk.RIGHT, padx=4, pady=4)
 
@@ -130,6 +133,29 @@ class PreviewWindow:
 
     def open_preview_externally(self) -> None:
         self.open_pdf_callback(self.preview_pdf_path)
+
+    def print_preview_pdf(self) -> None:
+        confirm = messagebox.askyesno(
+            "Print Assist",
+            "Print the preview PDF using your default Windows PDF printing setup?",
+            parent=self.window,
+        )
+        if not confirm:
+            return
+
+        if sys.platform != "win32" or not hasattr(os, "startfile"):
+            messagebox.showinfo(
+                "Print Assist",
+                "Direct printing is only supported through Windows/default PDF print handling.",
+                parent=self.window,
+            )
+            return
+
+        try:
+            os.startfile(str(self.preview_pdf_path), "print")
+            self.on_status_change("Print command sent")
+        except Exception as exc:
+            messagebox.showerror("Print Assist", f"Failed to send print command:\n{exc}", parent=self.window)
 
     def close(self) -> None:
         if self._closed:
