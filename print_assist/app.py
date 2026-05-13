@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import tempfile
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -9,6 +10,7 @@ from tkinter import filedialog, messagebox, ttk
 from . import APP_NAME
 from .file_utils import SUPPORTED_EXTENSIONS, default_output_path, filter_supported_files
 from .pdf_builder import build_combined_pdf
+from .preview_window import PreviewWindow
 
 
 class PrintAssistApp:
@@ -55,7 +57,7 @@ class PrintAssistApp:
             ("Move Down", self.move_down),
             ("Clear", self.clear_files),
             ("Choose Output", self.choose_output),
-            ("Create Print Assist PDF", self.create_pdf),
+            ("Preview Print Assist PDF", self.create_preview),
             ("Open Output Folder", self.open_output_folder),
         ]
 
@@ -142,30 +144,48 @@ class PrintAssistApp:
             self.output_var.set(f"Output: {self.output_path}")
             self.status_var.set("Output path selected.")
 
-    def create_pdf(self) -> None:
+    def create_preview(self) -> None:
         if not self.files:
             messagebox.showerror(APP_NAME, "Please add at least one supported file.")
             return
 
         if self.output_path is None:
             self.output_path = default_output_path(self.files)
+            self.output_var.set(f"Output: {self.output_path}")
+
+        preview_dir_obj = tempfile.TemporaryDirectory(prefix="print_assist_preview_")
+        preview_dir = Path(preview_dir_obj.name)
+        preview_pdf = preview_dir / "preview.pdf"
 
         try:
-            self.status_var.set("Creating combined PDF...")
+            self.status_var.set("Creating preview...")
             self.progress_var.set(30)
-            processed, warnings = build_combined_pdf(self.files, self.output_path)
+            processed, warnings = build_combined_pdf(self.files, preview_pdf)
             self.progress_var.set(100)
 
             if warnings:
                 messagebox.showwarning(APP_NAME, "\n".join(warnings))
 
-            messagebox.showinfo(APP_NAME, f"Created PDF with {len(processed)} file(s).\n{self.output_path}")
-            self.status_var.set("Done")
-            self.open_pdf(self.output_path)
+            if not processed:
+                preview_dir_obj.cleanup()
+                self.status_var.set("Error")
+                return
+
+            self.status_var.set("Preview ready")
+
+            preview_window = PreviewWindow(
+                parent=self.root,
+                preview_pdf_path=preview_pdf,
+                output_path=self.output_path,
+                open_pdf_callback=self.open_pdf,
+                on_status_change=self.status_var.set,
+                on_close_callback=preview_dir_obj.cleanup,
+            )
         except Exception as exc:
+            preview_dir_obj.cleanup()
             self.progress_var.set(0)
             self.status_var.set("Error")
-            messagebox.showerror(APP_NAME, f"Failed to create combined PDF:\n{exc}")
+            messagebox.showerror(APP_NAME, f"Failed to create preview PDF:\n{exc}")
 
     def open_output_folder(self) -> None:
         if self.output_path and self.output_path.parent.exists():
