@@ -50,14 +50,15 @@ def _add_image_page(output_doc: fitz.Document, image_path: Path) -> None:
     out_page.insert_image(target, filename=str(image_path), keep_proportion=True)
 
 
-def build_combined_pdf(files: list[Path], output_path: Path) -> tuple[list[str], list[str]]:
+def build_combined_pdf(files: list[Path], output_path: Path, progress_callback: callable | None = None) -> tuple[list[str], list[str]]:
     processed: list[str] = []
     warnings: list[str] = []
     output_doc = fitz.open()
     try:
         with tempfile.TemporaryDirectory(prefix="print_assist_") as temp_dir_raw:
             temp_dir = Path(temp_dir_raw)
-            for file_path in files:
+            total_files = len(files)
+            for index, file_path in enumerate(files, start=1):
                 try:
                     suffix = file_path.suffix.lower()
                     if suffix == ".pdf":
@@ -70,6 +71,8 @@ def build_combined_pdf(files: list[Path], output_path: Path) -> tuple[list[str],
                     else:
                         raise ValueError(f"Unsupported file extension: {file_path.suffix}")
                     processed.append(str(file_path))
+                    if progress_callback is not None:
+                        progress_callback(index, total_files, file_path, f"Processing {index} of {total_files}: {file_path.name}")
                 except Exception as exc:
                     warnings.append(f"Could not process '{file_path.name}': {exc}")
 

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
+import queue
 import subprocess
 import tempfile
+import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -30,6 +32,9 @@ class PrintAssistApp:
         self.status_var = tk.StringVar(value="Ready")
         self.output_var = tk.StringVar(value="No output file selected")
         self.progress_var = tk.DoubleVar(value=0)
+        self._preview_running = False
+        self._preview_queue: queue.Queue[tuple[str, object]] | None = None
+        self._preview_temp_dir_obj: tempfile.TemporaryDirectory[str] | None = None
 
         self._build_ui()
 
@@ -72,8 +77,11 @@ class PrintAssistApp:
             ("Open Output Folder", self.open_output_folder),
         ]
 
+        self.buttons: dict[str, ttk.Button] = {}
         for idx, (label, command) in enumerate(buttons):
-            ttk.Button(controls, text=label, command=command).grid(row=0, column=idx, padx=4, pady=2)
+            button = ttk.Button(controls, text=label, command=command)
+            button.grid(row=0, column=idx, padx=4, pady=2)
+            self.buttons[label] = button
 
         ttk.Label(frame, textvariable=self.output_var).pack(anchor="w", pady=(6, 2))
         ttk.Progressbar(frame, variable=self.progress_var, maximum=100).pack(fill=tk.X, pady=2)
@@ -205,7 +213,82 @@ class PrintAssistApp:
             self.output_var.set(f"Output: {self.output_path}")
             self.status_var.set("Output path selected.")
 
+    def _set_preview_controls_enabled(self, enabled: bool) -> None:
+        labels = [
+            "Add Files",
+            "Add Folder",
+            "Remove Selected",
+            "Move Up",
+            "Move Down",
+            "Clear",
+            "Choose Output",
+            "Preview Print Assist PDF",
+        ]
+        state = tk.NORMAL if enabled else tk.DISABLED
+        for label in labels:
+            button = self.buttons.get(label)
+            if button is not None:
+                button.configure(state=state)
+
+    def _cleanup_preview_temp_dir(self) -> None:
+        if self._preview_temp_dir_obj is not None:
+            self._preview_temp_dir_obj.cleanup()
+            self._preview_temp_dir_obj = None
+
+    def _poll_preview_queue(self) -> None:
+        if self._preview_queue is None:
+            return
+
+        while True:
+            try:
+                event_type, payload = self._preview_queue.get_nowait()
+            except queue.Empty:
+                break
+
+            if event_type == "progress":
+                current, total, file_path = payload
+                percent = 0 if total == 0 else (current / total) * 100
+                self.progress_var.set(percent)
+                self.status_var.set(f"Processing {current} of {total}: {Path(file_path).name}")
+            elif event_type == "done":
+                processed, warnings, preview_pdf = payload
+                self._preview_running = False
+                self._set_preview_controls_enabled(True)
+                self.progress_var.set(100)
+                if warnings:
+                    messagebox.showwarning(APP_NAME, "\n".join(warnings))
+                if not processed:
+                    self._cleanup_preview_temp_dir()
+                    self.progress_var.set(0)
+                    self.status_var.set("Error")
+                    return
+                self.status_var.set("Preview ready")
+                preview_window = PreviewWindow(
+                    parent=self.root,
+                    preview_pdf_path=preview_pdf,
+                    output_path=self.output_path,
+                    open_pdf_callback=self.open_pdf,
+                    on_status_change=self.status_var.set,
+                    on_close_callback=self._cleanup_preview_temp_dir,
+                )
+                _ = preview_window
+                return
+            elif event_type == "error":
+                self._preview_running = False
+                self._set_preview_controls_enabled(True)
+                self._cleanup_preview_temp_dir()
+                self.progress_var.set(0)
+                self.status_var.set("Error")
+                messagebox.showerror(APP_NAME, payload)
+                return
+
+        if self._preview_running:
+            self.root.after(100, self._poll_preview_queue)
+
     def create_preview(self) -> None:
+        if self._preview_running:
+            return
+
         if not self.files:
             messagebox.showerror(APP_NAME, "Please add at least one supported file.")
             return
@@ -214,39 +297,35 @@ class PrintAssistApp:
             self.output_path = default_output_path(self.files)
             self.output_var.set(f"Output: {self.output_path}")
 
-        preview_dir_obj = tempfile.TemporaryDirectory(prefix="print_assist_preview_")
-        preview_dir = Path(preview_dir_obj.name)
+        self._cleanup_preview_temp_dir()
+        self._preview_temp_dir_obj = tempfile.TemporaryDirectory(prefix="print_assist_preview_")
+        preview_dir = Path(self._preview_temp_dir_obj.name)
         preview_pdf = preview_dir / "preview.pdf"
 
-        try:
-            self.status_var.set("Creating preview...")
-            self.progress_var.set(30)
-            processed, warnings = build_combined_pdf(self.files, preview_pdf)
-            self.progress_var.set(100)
+        self._preview_running = True
+        self._set_preview_controls_enabled(False)
+        self.status_var.set("Creating preview...")
+        self.progress_var.set(0)
+        self._preview_queue = queue.Queue()
 
-            if warnings:
-                messagebox.showwarning(APP_NAME, "\n".join(warnings))
+        files_to_process = list(self.files)
 
-            if not processed:
-                preview_dir_obj.cleanup()
-                self.status_var.set("Error")
-                return
+        def progress_callback(current: int, total: int, file_path: Path, status_text: str) -> None:
+            _ = status_text
+            if self._preview_queue is not None:
+                self._preview_queue.put(("progress", (current, total, str(file_path))))
 
-            self.status_var.set("Preview ready")
+        def worker() -> None:
+            try:
+                processed, warnings = build_combined_pdf(files_to_process, preview_pdf, progress_callback=progress_callback)
+                if self._preview_queue is not None:
+                    self._preview_queue.put(("done", (processed, warnings, preview_pdf)))
+            except Exception as exc:
+                if self._preview_queue is not None:
+                    self._preview_queue.put(("error", f"Failed to create preview PDF:\n{exc}"))
 
-            preview_window = PreviewWindow(
-                parent=self.root,
-                preview_pdf_path=preview_pdf,
-                output_path=self.output_path,
-                open_pdf_callback=self.open_pdf,
-                on_status_change=self.status_var.set,
-                on_close_callback=preview_dir_obj.cleanup,
-            )
-        except Exception as exc:
-            preview_dir_obj.cleanup()
-            self.progress_var.set(0)
-            self.status_var.set("Error")
-            messagebox.showerror(APP_NAME, f"Failed to create preview PDF:\n{exc}")
+        threading.Thread(target=worker, daemon=True).start()
+        self.root.after(100, self._poll_preview_queue)
 
     def open_output_folder(self) -> None:
         if self.output_path and self.output_path.parent.exists():
