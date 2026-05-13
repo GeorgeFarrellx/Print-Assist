@@ -17,6 +17,7 @@ Print Assist is a Windows-first Python desktop app that combines mixed printable
 
 - Add multiple files using file picker.
 - Add a folder and import supported files from that folder (non-recursive).
+- Add Client Folder to import supported direct files plus supported files from direct child Attachments/Attachment/Email Attachments folders (non-recursive beyond those folders).
 - Shows selected files in a list.
 - Reorder file order (Move Up / Move Down).
 - Remove selected files or clear all.
@@ -60,6 +61,7 @@ python main.py
 - Excel output may span multiple pages based on workbook print areas and page setup.
 - `.msg` conversion includes email message content only; embedded `.msg` attachments are not automatically included and should be added separately as saved files.
 - Folder import reads direct child files only (subfolders are ignored in this version), which is useful for quickly loading files from an Outlook macro's saved Attachments folder.
+- Add Client Folder is designed for Outlook macro client folders where a saved `.msg` is in the parent folder and saved attachments are in an `Attachments` (or `Attachment` / `Email Attachments`) subfolder.
 
 ## Current limitations
 
