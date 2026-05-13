@@ -16,6 +16,7 @@ Print Assist is a Windows-first Python desktop app that combines mixed printable
 ## What it does
 
 - Add multiple files using file picker.
+- Add a folder and import supported files from that folder (non-recursive).
 - Shows selected files in a list.
 - Reorder file order (Move Up / Move Down).
 - Remove selected files or clear all.
@@ -56,6 +57,7 @@ python main.py
 - `.msg` conversion uses Outlook to export email header/body content to a temporary MHT/MHTML file, then uses Word to convert that file to PDF.
 - Excel output may span multiple pages based on workbook print areas and page setup.
 - `.msg` conversion includes email message content only; embedded `.msg` attachments are not automatically included and should be added separately as saved files.
+- Folder import reads direct child files only (subfolders are ignored in this version), which is useful for quickly loading files from an Outlook macro's saved Attachments folder.
 
 ## Current limitations
 
