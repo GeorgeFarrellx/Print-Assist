@@ -18,3 +18,5 @@ Current important repo files and raw GitHub links:
   https://raw.githubusercontent.com/GeorgeFarrellx/Print-Assist/main/print_assist/office_converter.py
 - requirements.txt  
   https://raw.githubusercontent.com/GeorgeFarrellx/Print-Assist/main/requirements.txt
+- print_assist/preview_window.py  
+  https://raw.githubusercontent.com/GeorgeFarrellx/Print-Assist/main/print_assist/preview_window.py

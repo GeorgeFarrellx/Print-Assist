@@ -20,8 +20,9 @@ Print Assist is a Windows-first Python desktop app that combines mixed printable
 - Reorder file order (Move Up / Move Down).
 - Remove selected files or clear all.
 - Choose output location/name.
-- Create one combined PDF with A4-fitted pages.
-- Open the generated PDF after creation.
+- Create an in-app preview of one combined PDF with A4-fitted pages.
+- Save the final combined PDF from the preview window.
+- Open preview or saved PDF externally.
 - Open output folder.
 
 ## Install
@@ -39,8 +40,12 @@ pip install -r requirements.txt
 python main.py
 ```
 
-## Output behavior
+## Preview and output behavior
 
+- "Preview Print Assist PDF" generates a temporary combined preview PDF using the same build pipeline as final output.
+- Preview is shown in-app with page navigation and zoom.
+- "Save Final PDF" copies the exact preview PDF to the selected output path so reviewed pages match saved output.
+- Preview should match final output as closely as possible because both use the same combined-PDF generation process.
 - Output defaults to: `Print Assist - YYYYMMDD_HHMMSS.pdf`
 - If all selected files come from one folder, that folder is used as default save location.
 - PDF pages are fitted onto A4 (portrait/landscape chosen automatically), centered, no cropping.
@@ -54,7 +59,7 @@ python main.py
 
 - Drag-and-drop support is best-effort and may depend on local Tk setup.
 - Word/Excel/MSG conversion requires installed Microsoft Office/Outlook on Windows.
-- No direct printing yet (output is combined PDF only).
+- No direct printing yet (preview and save combined PDF only).
 
 ## Planned future enhancements
 
