@@ -71,7 +71,7 @@ class PrintAssistApp:
         self._append_paths(raw)
 
     def add_files(self) -> None:
-        types = [("Supported files", "*.pdf *.jpg *.jpeg *.png *.bmp *.tif *.tiff"), ("All files", "*.*")]
+        types = [("PDF", "*.pdf"), ("Images", "*.jpg *.jpeg *.png *.bmp *.tif *.tiff"), ("Word documents", "*.doc *.docx"), ("Excel workbooks", "*.xls *.xlsx *.xlsm *.xlsb"), ("Outlook messages", "*.msg"), ("All files", "*.*")]
         selected = filedialog.askopenfilenames(title="Select files", filetypes=types)
         self._append_paths(selected)
 
