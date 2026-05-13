@@ -61,7 +61,8 @@ python main.py
 
 ## Current limitations
 
-- Drag-and-drop support is best-effort and may depend on local Tk setup.
+- Drag-and-drop supports files/folders via `tkinterdnd2` when available.
+- If drag/drop is unavailable in the local environment, Add Files and Add Folder remain fully supported.
 - Word/Excel/MSG conversion requires installed Microsoft Office/Outlook on Windows.
 - Preview-window printing depends on Windows/default PDF print handling behavior.
 - Printer selection, duplex, tray selection, paper selection, and other advanced print options are not implemented yet.
