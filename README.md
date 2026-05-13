@@ -2,13 +2,16 @@
 
 Print Assist is a Windows-first Python desktop app that combines mixed printable files into one clean, print-ready PDF.
 
-## Supported file types (v1)
+## Supported file types (current)
 
 - PDF
 - JPG / JPEG
 - PNG
 - BMP
 - TIF / TIFF
+- DOC / DOCX (Microsoft Word required on Windows)
+- XLS / XLSX / XLSM / XLSB (Microsoft Excel required on Windows)
+- MSG (Microsoft Outlook required on Windows)
 
 ## What it does
 
@@ -42,18 +45,18 @@ python main.py
 - If all selected files come from one folder, that folder is used as default save location.
 - PDF pages are fitted onto A4 (portrait/landscape chosen automatically), centered, no cropping.
 - Images are placed one per A4 page (portrait/landscape chosen automatically), centered, no cropping.
+- Word/Excel/MSG files are converted to temporary PDFs first, then added to the combined output PDF.
+- Excel output may span multiple pages based on workbook print areas and page setup.
+- `.msg` conversion includes the email message content and does not automatically include embedded attachments.
 
 ## Current limitations
 
 - Drag-and-drop support is best-effort and may depend on local Tk setup.
-- Word, Excel, and Outlook `.msg` are not included in v1.
+- Word/Excel/MSG conversion requires installed Microsoft Office/Outlook on Windows.
 - No direct printing yet (output is combined PDF only).
 
 ## Planned future enhancements
 
-- Word support
-- Excel support
-- Outlook `.msg` support
 - Direct print button
 - Save/load file batches
 - Integration with Outlook attachment saving workflow

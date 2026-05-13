@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 
 import fitz
 from PIL import Image
 
+from .office_converter import EXCEL_EXTENSIONS, MSG_EXTENSIONS, WORD_EXTENSIONS, convert_to_pdf_if_needed
+
 A4_PORTRAIT = (595.2756, 841.8898)
 A4_LANDSCAPE = (841.8898, 595.2756)
 MARGIN = 24
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
+OFFICE_EXTENSIONS = WORD_EXTENSIONS | EXCEL_EXTENSIONS | MSG_EXTENSIONS
 
 
 def _fit_rect(src_width: float, src_height: float, page_width: float, page_height: float, margin: float) -> fitz.Rect:
@@ -50,22 +55,28 @@ def build_combined_pdf(files: list[Path], output_path: Path) -> tuple[list[str],
     warnings: list[str] = []
     output_doc = fitz.open()
     try:
-        for file_path in files:
-            try:
-                suffix = file_path.suffix.lower()
-                if suffix == ".pdf":
-                    _add_pdf_pages(output_doc, file_path)
+        with tempfile.TemporaryDirectory(prefix="print_assist_") as temp_dir_raw:
+            temp_dir = Path(temp_dir_raw)
+            for file_path in files:
+                try:
+                    suffix = file_path.suffix.lower()
+                    if suffix == ".pdf":
+                        _add_pdf_pages(output_doc, file_path)
+                    elif suffix in IMAGE_EXTENSIONS:
+                        _add_image_page(output_doc, file_path)
+                    elif suffix in OFFICE_EXTENSIONS:
+                        converted_pdf = convert_to_pdf_if_needed(file_path, temp_dir)
+                        _add_pdf_pages(output_doc, converted_pdf)
+                    else:
+                        raise ValueError(f"Unsupported file extension: {file_path.suffix}")
                     processed.append(str(file_path))
-                else:
-                    _add_image_page(output_doc, file_path)
-                    processed.append(str(file_path))
-            except Exception as exc:
-                warnings.append(f"Could not process '{file_path.name}': {exc}")
+                except Exception as exc:
+                    warnings.append(f"Could not process '{file_path.name}': {exc}")
 
-        if not processed:
-            raise ValueError("No files were successfully processed.")
+            if not processed:
+                raise ValueError("No files were successfully processed.")
 
-        output_doc.save(output_path)
+            output_doc.save(output_path)
         return processed, warnings
     finally:
         output_doc.close()
