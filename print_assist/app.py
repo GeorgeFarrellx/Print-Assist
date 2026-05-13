@@ -7,6 +7,11 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
+try:
+    from tkinterdnd2 import DND_FILES
+except Exception:
+    DND_FILES = None
+
 from . import APP_NAME
 from .file_utils import SUPPORTED_EXTENSIONS, default_output_path, filter_supported_files, get_supported_files_from_folder
 from .pdf_builder import build_combined_pdf
@@ -35,17 +40,22 @@ class PrintAssistApp:
         frame = ttk.Frame(self.root, padding=12)
         frame.pack(fill=tk.BOTH, expand=True)
 
-        list_label = ttk.Label(frame, text="Drop files here (or use Add Files):")
+        list_label = ttk.Label(frame, text="Drop files/folders here, or use Add Files / Add Folder:")
         list_label.pack(anchor="w")
 
         self.listbox = tk.Listbox(frame, selectmode=tk.EXTENDED, height=18)
         self.listbox.pack(fill=tk.BOTH, expand=True, pady=(6, 10))
 
-        try:
-            self.root.drop_target_register(tk.DND_FILES)
-            self.root.dnd_bind("<<Drop>>", self._on_drop)  # type: ignore[attr-defined]
-        except Exception:
-            pass
+        drag_drop_enabled = False
+        if DND_FILES is not None and hasattr(self.root, "drop_target_register") and hasattr(self.root, "dnd_bind"):
+            try:
+                self.root.drop_target_register(DND_FILES)
+                self.root.dnd_bind("<<Drop>>", self._on_drop)  # type: ignore[attr-defined]
+                drag_drop_enabled = True
+            except Exception:
+                drag_drop_enabled = False
+        if not drag_drop_enabled:
+            self.status_var.set("Use Add Files or Add Folder")
 
         controls = ttk.Frame(frame)
         controls.pack(fill=tk.X, pady=(0, 8))
@@ -71,7 +81,19 @@ class PrintAssistApp:
 
     def _on_drop(self, event: tk.Event) -> None:
         raw = self.root.tk.splitlist(event.data)
-        self._append_paths(raw)
+        dropped_files: list[str] = []
+        unsupported: list[Path] = []
+
+        for item in raw:
+            path = Path(item)
+            if path.is_dir():
+                supported, folder_unsupported = get_supported_files_from_folder(path)
+                dropped_files.extend(str(p) for p in supported)
+                unsupported.extend(folder_unsupported)
+            else:
+                dropped_files.append(item)
+
+        self._append_paths(dropped_files, precomputed_unsupported=unsupported)
 
     def add_files(self) -> None:
         types = [("PDF", "*.pdf"), ("Images", "*.jpg *.jpeg *.png *.bmp *.tif *.tiff"), ("Word documents", "*.doc *.docx"), ("Excel workbooks", "*.xls *.xlsx *.xlsm *.xlsb"), ("Outlook messages", "*.msg"), ("All files", "*.*")]
@@ -110,8 +132,10 @@ class PrintAssistApp:
         else:
             self.status_var.set("No supported files found in the selected folder.")
 
-    def _append_paths(self, raw_paths: tuple[str, ...] | list[str]) -> None:
+    def _append_paths(self, raw_paths: tuple[str, ...] | list[str], precomputed_unsupported: list[Path] | None = None) -> None:
         supported, unsupported = filter_supported_files(raw_paths)
+        if precomputed_unsupported:
+            unsupported = list(unsupported) + precomputed_unsupported
         added = 0
         for p in supported:
             if p not in self.files:
@@ -124,7 +148,11 @@ class PrintAssistApp:
             self.output_var.set(f"Output: {self.output_path}")
 
         if unsupported:
-            warning_msg = "Unsupported files skipped:\n" + "\n".join(u.name for u in unsupported)
+            display_unsupported = unsupported[:20]
+            warning_msg = "Unsupported files skipped:\n" + "\n".join(u.name for u in display_unsupported)
+            remaining = len(unsupported) - len(display_unsupported)
+            if remaining > 0:
+                warning_msg += f"\n...and {remaining} more unsupported file(s)."
             messagebox.showwarning(APP_NAME, warning_msg)
 
         self.status_var.set(f"{len(self.files)} file(s) selected.")
@@ -233,8 +261,8 @@ class PrintAssistApp:
             subprocess.run(["xdg-open", str(path)], check=False)
 
 
-def run() -> None:
-    root = tk.Tk()
+def run(root: tk.Tk | None = None) -> None:
+    root = root if root is not None else tk.Tk()
     app = PrintAssistApp(root)
     _ = app
     root.mainloop()
