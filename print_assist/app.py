@@ -8,7 +8,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from . import APP_NAME
-from .file_utils import SUPPORTED_EXTENSIONS, default_output_path, filter_supported_files
+from .file_utils import SUPPORTED_EXTENSIONS, default_output_path, filter_supported_files, get_supported_files_from_folder
 from .pdf_builder import build_combined_pdf
 from .preview_window import PreviewWindow
 
@@ -52,6 +52,7 @@ class PrintAssistApp:
 
         buttons = [
             ("Add Files", self.add_files),
+            ("Add Folder", self.add_folder),
             ("Remove Selected", self.remove_selected),
             ("Move Up", self.move_up),
             ("Move Down", self.move_down),
@@ -76,6 +77,38 @@ class PrintAssistApp:
         types = [("PDF", "*.pdf"), ("Images", "*.jpg *.jpeg *.png *.bmp *.tif *.tiff"), ("Word documents", "*.doc *.docx"), ("Excel workbooks", "*.xls *.xlsx *.xlsm *.xlsb"), ("Outlook messages", "*.msg"), ("All files", "*.*")]
         selected = filedialog.askopenfilenames(title="Select files", filetypes=types)
         self._append_paths(selected)
+
+    def add_folder(self) -> None:
+        selected_folder = filedialog.askdirectory(title="Select folder")
+        if not selected_folder:
+            return
+
+        supported, unsupported = get_supported_files_from_folder(Path(selected_folder))
+        added = 0
+        for p in supported:
+            if p not in self.files:
+                self.files.append(p)
+                self.listbox.insert(tk.END, str(p))
+                added += 1
+
+        if added and self.output_path is None:
+            self.output_path = default_output_path(self.files)
+            self.output_var.set(f"Output: {self.output_path}")
+
+        if unsupported:
+            display_unsupported = unsupported[:20]
+            warning_msg = "Unsupported files skipped:\n" + "\n".join(u.name for u in display_unsupported)
+            remaining = len(unsupported) - len(display_unsupported)
+            if remaining > 0:
+                warning_msg += f"\n...and {remaining} more unsupported file(s)."
+            messagebox.showwarning(APP_NAME, warning_msg)
+
+        if added:
+            self.status_var.set(f"Added {added} file(s) from folder.")
+        elif supported:
+            self.status_var.set("No new files were added from folder.")
+        else:
+            self.status_var.set("No supported files found in the selected folder.")
 
     def _append_paths(self, raw_paths: tuple[str, ...] | list[str]) -> None:
         supported, unsupported = filter_supported_files(raw_paths)
