@@ -13,6 +13,7 @@ EXCEL_XLTYPE_PDF = 0
 EXCEL_UPDATE_LINKS_NEVER = 0
 EXCEL_CORRUPT_LOAD_NORMAL = 0
 OUTLOOK_OLMSG_UNICODE = 9
+OUTLOOK_OL_MHTML = 10
 
 
 def _require_windows() -> None:
@@ -78,19 +79,21 @@ def _msg_to_pdf(source_path: Path, output_path: Path, temp_dir: Path) -> None:
     pythoncom.CoInitialize()
     outlook = None
     message = None
-    temp_mhtml = temp_dir / f"{source_path.stem}_msg_export.mhtml"
+    temp_mht = temp_dir / f"{source_path.stem}_msg_export.mht"
     try:
         outlook = win32com.client.DispatchEx("Outlook.Application")
         namespace = outlook.GetNamespace("MAPI")
         message = namespace.OpenSharedItem(str(source_path))
-        message.SaveAs(str(temp_mhtml), OUTLOOK_OLMSG_UNICODE)
+        message.SaveAs(str(temp_mht), OUTLOOK_OL_MHTML)
+    except Exception as exc:
+        raise RuntimeError(f"Failed to convert MSG to PDF via Outlook/Word: {source_path.name}") from exc
     finally:
         message = None
         if outlook is not None:
             outlook.Quit()
         pythoncom.CoUninitialize()
 
-    _word_to_pdf(temp_mhtml, output_path)
+    _word_to_pdf(temp_mht, output_path)
 
 
 def convert_to_pdf_if_needed(source_path: Path, temp_dir: Path) -> Path:

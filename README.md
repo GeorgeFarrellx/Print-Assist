@@ -46,8 +46,9 @@ python main.py
 - PDF pages are fitted onto A4 (portrait/landscape chosen automatically), centered, no cropping.
 - Images are placed one per A4 page (portrait/landscape chosen automatically), centered, no cropping.
 - Word/Excel/MSG files are converted to temporary PDFs first, then added to the combined output PDF.
+- `.msg` conversion uses Outlook to export email header/body content to a temporary MHT/MHTML file, then uses Word to convert that file to PDF.
 - Excel output may span multiple pages based on workbook print areas and page setup.
-- `.msg` conversion includes the email message content and does not automatically include embedded attachments.
+- `.msg` conversion includes email message content only; embedded `.msg` attachments are not automatically included and should be added separately as saved files.
 
 ## Current limitations
 
