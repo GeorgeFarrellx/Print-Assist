@@ -18,7 +18,8 @@ Print Assist is a Windows-first Python desktop app that combines mixed printable
 - Add multiple files using file picker.
 - Add a folder and import supported files from that folder (non-recursive).
 - Add Client Folder to import supported direct files plus supported files from direct child Attachments/Attachment/Email Attachments folders (non-recursive beyond those folders).
-- Shows selected files in a list.
+- Shows selected files in a list with vertical and horizontal scrollbars for long file lists/paths.
+- Main controls are grouped into Import, File list/order, and Output/action rows for a clearer layout.
 - Reorder file order (Move Up / Move Down).
 - Remove selected files or clear all.
 - Choose output location/name.
