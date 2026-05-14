@@ -20,6 +20,7 @@ class PreviewWindow:
         open_pdf_callback,
         on_status_change,
         on_close_callback,
+        file_manifest: list[dict[str, object]] | None = None,
     ) -> None:
         self.parent = parent
         self.preview_pdf_path = preview_pdf_path
@@ -28,6 +29,7 @@ class PreviewWindow:
         self.on_status_change = on_status_change
         self.on_close_callback = on_close_callback
         self._closed = False
+        self.file_manifest = file_manifest or []
 
         self.zoom = 1.0
         self.page_index = 0
@@ -78,6 +80,7 @@ class PreviewWindow:
         self.prev_btn.pack(side=tk.LEFT, padx=4, pady=4)
         self.next_btn.pack(side=tk.LEFT, padx=4, pady=4)
         ttk.Button(buttons, text="Save Final PDF", command=self.save_final_pdf).pack(side=tk.RIGHT, padx=4, pady=4)
+        ttk.Button(buttons, text="File Summary", command=self.open_file_summary).pack(side=tk.RIGHT, padx=4, pady=4)
         ttk.Button(buttons, text="Print Preview PDF", command=self.print_preview_pdf).pack(side=tk.RIGHT, padx=4, pady=4)
         ttk.Button(buttons, text="Open Preview Externally", command=self.open_preview_externally).pack(side=tk.RIGHT, padx=4, pady=4)
         ttk.Button(buttons, text="Close", command=self.close).pack(side=tk.RIGHT, padx=4, pady=4)
@@ -94,9 +97,77 @@ class PreviewWindow:
         self.canvas.config(scrollregion=(0, 0, pix.width, pix.height))
 
         total = len(self.doc)
-        self.page_var.set(f"Page {self.page_index + 1} of {total}")
+        page_number = self.page_index + 1
+        source_name = self._get_source_name_for_page(page_number)
+        if source_name:
+            self.page_var.set(f"Page {page_number} of {total} — Source: {source_name}")
+        else:
+            self.page_var.set(f"Page {page_number} of {total}")
         self.prev_btn.configure(state=tk.NORMAL if self.page_index > 0 else tk.DISABLED)
         self.next_btn.configure(state=tk.NORMAL if self.page_index < total - 1 else tk.DISABLED)
+
+
+    def _get_source_name_for_page(self, page_number: int) -> str | None:
+        for entry in self.file_manifest:
+            start_page = entry.get("output_start_page")
+            end_page = entry.get("output_end_page")
+            if isinstance(start_page, int) and isinstance(end_page, int) and start_page <= page_number <= end_page:
+                source_name = entry.get("source_name")
+                if isinstance(source_name, str):
+                    return source_name
+        return None
+
+    def open_file_summary(self) -> None:
+        summary_window = tk.Toplevel(self.window)
+        summary_window.title("File Summary")
+        summary_window.geometry("980x340")
+        summary_window.minsize(700, 220)
+
+        container = ttk.Frame(summary_window, padding=8)
+        container.pack(fill=tk.BOTH, expand=True)
+
+        columns = ("order", "name", "type", "range", "count", "path")
+        tree = ttk.Treeview(container, columns=columns, show="headings")
+        tree.heading("order", text="Order")
+        tree.heading("name", text="File name")
+        tree.heading("type", text="Type")
+        tree.heading("range", text="Page range")
+        tree.heading("count", text="Page count")
+        tree.heading("path", text="Full path")
+
+        tree.column("order", width=70, minwidth=60, anchor=tk.CENTER)
+        tree.column("name", width=200, minwidth=160)
+        tree.column("type", width=90, minwidth=80, anchor=tk.CENTER)
+        tree.column("range", width=110, minwidth=100, anchor=tk.CENTER)
+        tree.column("count", width=90, minwidth=80, anchor=tk.CENTER)
+        tree.column("path", width=400, minwidth=260)
+
+        y_scroll = ttk.Scrollbar(container, orient=tk.VERTICAL, command=tree.yview)
+        x_scroll = ttk.Scrollbar(container, orient=tk.HORIZONTAL, command=tree.xview)
+        tree.configure(yscrollcommand=y_scroll.set, xscrollcommand=x_scroll.set)
+
+        tree.grid(row=0, column=0, sticky="nsew")
+        y_scroll.grid(row=0, column=1, sticky="ns")
+        x_scroll.grid(row=1, column=0, sticky="ew")
+        container.rowconfigure(0, weight=1)
+        container.columnconfigure(0, weight=1)
+
+        for idx, entry in enumerate(self.file_manifest, start=1):
+            start_page = entry.get("output_start_page", "")
+            end_page = entry.get("output_end_page", "")
+            page_range = f"{start_page}-{end_page}" if start_page != "" and end_page != "" else ""
+            tree.insert(
+                "",
+                tk.END,
+                values=(
+                    idx,
+                    entry.get("source_name", ""),
+                    entry.get("source_extension", ""),
+                    page_range,
+                    entry.get("output_page_count", ""),
+                    entry.get("source_path", ""),
+                ),
+            )
 
     def prev_page(self) -> None:
         if self.page_index > 0:

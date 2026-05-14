@@ -306,7 +306,7 @@ class PrintAssistApp:
                 self.progress_var.set(percent)
                 self.status_var.set(f"Processing {current} of {total}: {Path(file_path).name}")
             elif event_type == "done":
-                processed, warnings, preview_pdf = payload
+                processed, warnings, preview_pdf, file_manifest = payload
                 self._preview_running = False
                 self._set_preview_controls_enabled(True)
                 self.progress_var.set(100)
@@ -325,6 +325,7 @@ class PrintAssistApp:
                     open_pdf_callback=self.open_pdf,
                     on_status_change=self.status_var.set,
                     on_close_callback=self._cleanup_preview_temp_dir,
+                    file_manifest=file_manifest,
                 )
                 _ = preview_window
                 return
@@ -372,9 +373,19 @@ class PrintAssistApp:
 
         def worker() -> None:
             try:
-                processed, warnings = build_combined_pdf(files_to_process, preview_pdf, progress_callback=progress_callback)
+                file_manifest: list[dict[str, object]] = []
+
+                def manifest_callback(entry: dict[str, object]) -> None:
+                    file_manifest.append(entry)
+
+                processed, warnings = build_combined_pdf(
+                    files_to_process,
+                    preview_pdf,
+                    progress_callback=progress_callback,
+                    manifest_callback=manifest_callback,
+                )
                 if self._preview_queue is not None:
-                    self._preview_queue.put(("done", (processed, warnings, preview_pdf)))
+                    self._preview_queue.put(("done", (processed, warnings, preview_pdf, file_manifest)))
             except Exception as exc:
                 if self._preview_queue is not None:
                     self._preview_queue.put(("error", f"Failed to create preview PDF:\n{exc}"))

@@ -49,7 +49,8 @@ python main.py
 - "Preview Print Assist PDF" generates a temporary combined preview PDF using the same build pipeline as final output.
 - Preview generation runs in a background worker so the main window stays responsive during longer conversions.
 - Preview progress now updates per file with status text showing which file is being processed.
-- Preview is shown in-app with page navigation and zoom.
+- Preview is shown in-app with page navigation and zoom, and displays the source file name for the current page when available.
+- Preview includes a File Summary window listing source file order, type, page range, page count, and full source path.
 - "Save Final PDF" copies the exact preview PDF to the selected output path so reviewed pages match saved output.
 - "Print Preview PDF" sends the exact generated preview PDF to Windows/default PDF print handling after confirmation.
 - Preview should match final output as closely as possible because both use the same combined-PDF generation process.
