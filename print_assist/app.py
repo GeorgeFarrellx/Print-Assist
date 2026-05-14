@@ -46,7 +46,7 @@ class PrintAssistApp:
         frame = ttk.Frame(self.root, padding=12)
         frame.pack(fill=tk.BOTH, expand=True)
 
-        list_label = ttk.Label(frame, text="Drop files/folders here, or use Add Files / Add Folder:")
+        list_label = ttk.Label(frame, text="Drop files/folders here, or use Add Files / Add Folder / Add Client Folder:")
         list_label.pack(anchor="w")
 
         list_frame = ttk.Frame(frame)
@@ -71,7 +71,7 @@ class PrintAssistApp:
             except Exception:
                 drag_drop_enabled = False
         if not drag_drop_enabled:
-            self.status_var.set("Use Add Files or Add Folder")
+            self.status_var.set("Use Add Files, Add Folder, or Add Client Folder")
 
         controls = ttk.Frame(frame)
         controls.pack(fill=tk.X, pady=(0, 8))
