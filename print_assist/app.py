@@ -32,6 +32,7 @@ class PrintAssistApp:
         self.status_var = tk.StringVar(value="Ready")
         self.output_var = tk.StringVar(value="No output file selected")
         self.progress_var = tk.DoubleVar(value=0)
+        self.file_count_var = tk.StringVar(value="Selected files: 0")
         self._preview_running = False
         self._preview_queue: queue.Queue[tuple[str, object]] | None = None
         self._preview_temp_dir_obj: tempfile.TemporaryDirectory[str] | None = None
@@ -48,8 +49,18 @@ class PrintAssistApp:
         list_label = ttk.Label(frame, text="Drop files/folders here, or use Add Files / Add Folder:")
         list_label.pack(anchor="w")
 
-        self.listbox = tk.Listbox(frame, selectmode=tk.EXTENDED, height=18)
-        self.listbox.pack(fill=tk.BOTH, expand=True, pady=(6, 10))
+        list_frame = ttk.Frame(frame)
+        list_frame.pack(fill=tk.BOTH, expand=True, pady=(6, 10))
+
+        self.listbox = tk.Listbox(list_frame, selectmode=tk.EXTENDED, height=18, xscrollcommand=None, yscrollcommand=None)
+        self.listbox.grid(row=0, column=0, sticky="nsew")
+        y_scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.listbox.yview)
+        y_scrollbar.grid(row=0, column=1, sticky="ns")
+        x_scrollbar = ttk.Scrollbar(list_frame, orient=tk.HORIZONTAL, command=self.listbox.xview)
+        x_scrollbar.grid(row=1, column=0, sticky="ew")
+        self.listbox.configure(yscrollcommand=y_scrollbar.set, xscrollcommand=x_scrollbar.set)
+        list_frame.columnconfigure(0, weight=1)
+        list_frame.rowconfigure(0, weight=1)
 
         drag_drop_enabled = False
         if DND_FILES is not None and hasattr(self.root, "drop_target_register") and hasattr(self.root, "dnd_bind"):
@@ -65,25 +76,22 @@ class PrintAssistApp:
         controls = ttk.Frame(frame)
         controls.pack(fill=tk.X, pady=(0, 8))
 
-        buttons = [
-            ("Add Files", self.add_files),
-            ("Add Folder", self.add_folder),
-            ("Add Client Folder", self.add_client_folder),
-            ("Remove Selected", self.remove_selected),
-            ("Move Up", self.move_up),
-            ("Move Down", self.move_down),
-            ("Clear", self.clear_files),
-            ("Choose Output", self.choose_output),
-            ("Preview Print Assist PDF", self.create_preview),
-            ("Open Output Folder", self.open_output_folder),
+        button_groups = [
+            [("Add Files", self.add_files), ("Add Folder", self.add_folder), ("Add Client Folder", self.add_client_folder)],
+            [("Remove Selected", self.remove_selected), ("Move Up", self.move_up), ("Move Down", self.move_down), ("Clear", self.clear_files)],
+            [("Choose Output", self.choose_output), ("Preview Print Assist PDF", self.create_preview), ("Open Output Folder", self.open_output_folder)],
         ]
 
         self.buttons: dict[str, ttk.Button] = {}
-        for idx, (label, command) in enumerate(buttons):
-            button = ttk.Button(controls, text=label, command=command)
-            button.grid(row=0, column=idx, padx=4, pady=2)
-            self.buttons[label] = button
+        for row_idx, group in enumerate(button_groups):
+            row_frame = ttk.Frame(controls)
+            row_frame.pack(fill=tk.X, pady=2)
+            for col_idx, (label, command) in enumerate(group):
+                button = ttk.Button(row_frame, text=label, command=command)
+                button.grid(row=0, column=col_idx, padx=4, pady=2, sticky="w")
+                self.buttons[label] = button
 
+        ttk.Label(frame, textvariable=self.file_count_var).pack(anchor="w", pady=(0, 2))
         ttk.Label(frame, textvariable=self.output_var).pack(anchor="w", pady=(6, 2))
         ttk.Progressbar(frame, variable=self.progress_var, maximum=100).pack(fill=tk.X, pady=2)
         ttk.Label(frame, textvariable=self.status_var).pack(anchor="w", pady=(6, 0))
@@ -126,6 +134,9 @@ class PrintAssistApp:
             self.output_path = default_output_path(self.files)
             self.output_var.set(f"Output: {self.output_path}")
 
+        if added:
+            self._update_file_count()
+
         if unsupported:
             display_unsupported = unsupported[:20]
             warning_msg = "Unsupported files skipped:\n" + "\n".join(u.name for u in display_unsupported)
@@ -158,6 +169,9 @@ class PrintAssistApp:
         if added and self.output_path is None:
             self.output_path = default_output_path(self.files)
             self.output_var.set(f"Output: {self.output_path}")
+
+        if added:
+            self._update_file_count()
 
         if unsupported:
             display_unsupported = unsupported[:20]
@@ -197,13 +211,18 @@ class PrintAssistApp:
                 warning_msg += f"\n...and {remaining} more unsupported file(s)."
             messagebox.showwarning(APP_NAME, warning_msg)
 
+        self._update_file_count()
         self.status_var.set(f"{len(self.files)} file(s) selected.")
+
+    def _update_file_count(self) -> None:
+        self.file_count_var.set(f"Selected files: {len(self.files)}")
 
     def remove_selected(self) -> None:
         indices = list(self.listbox.curselection())
         for i in reversed(indices):
             self.listbox.delete(i)
             self.files.pop(i)
+        self._update_file_count()
         self.status_var.set(f"{len(indices)} file(s) removed.")
 
     def move_up(self) -> None:
@@ -231,6 +250,7 @@ class PrintAssistApp:
         self.files.clear()
         self.listbox.delete(0, tk.END)
         self.progress_var.set(0)
+        self._update_file_count()
         self.status_var.set("File list cleared.")
 
     def choose_output(self) -> None:
