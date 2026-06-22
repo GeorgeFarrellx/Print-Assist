@@ -6,6 +6,15 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 
+class ZipExtractionWarning(Exception):
+    def __init__(self, output_folder: Path, unsafe_paths: list[str]) -> None:
+        self.output_folder = output_folder
+        self.unsafe_paths = unsafe_paths
+        super().__init__(
+            f"Skipped unsafe ZIP path(s); extracted safe files to {output_folder}:\n" + "\n".join(unsafe_paths)
+        )
+
+
 def short_name_for_sequence(sequence: int) -> str:
     if sequence < 1:
         raise ValueError("Sequence must be 1 or greater.")
@@ -27,6 +36,11 @@ def default_renamed_zip_path(source_zip: Path) -> Path:
     return source_zip.with_name(f"{source_zip.stem} - renamed.zip")
 
 
+def default_extracted_folder_path(source_zip: Path, parent_folder: Path | None = None) -> Path:
+    parent = Path(parent_folder) if parent_folder is not None else Path(source_zip).parent
+    return parent / f"{Path(source_zip).stem} - renamed"
+
+
 def unique_zip_path(path: Path) -> Path:
     if not path.exists():
         return path
@@ -34,6 +48,18 @@ def unique_zip_path(path: Path) -> Path:
     counter = 2
     while True:
         candidate = path.with_name(f"{path.stem} ({counter}){path.suffix}")
+        if not candidate.exists():
+            return candidate
+        counter += 1
+
+
+def unique_folder_path(path: Path) -> Path:
+    if not path.exists():
+        return path
+
+    counter = 2
+    while True:
+        candidate = path.with_name(f"{path.name} ({counter})")
         if not candidate.exists():
             return candidate
         counter += 1
@@ -88,6 +114,86 @@ def rename_zip_contents(source_zip: Path, output_zip: Path) -> Path:
         target.writestr("Name_Mapping.csv", _build_mapping_csv(mapping_rows))
 
     return output_zip
+
+
+def rename_and_extract_zip_contents(source_zip: Path, output_folder: Path) -> Path:
+    source_zip = Path(source_zip)
+    output_folder = Path(output_folder)
+    output_folder.mkdir(parents=True, exist_ok=False)
+    output_root = output_folder.resolve()
+
+    mapping_rows: list[dict[str, str]] = []
+    warnings: list[str] = []
+    sequence = 0
+
+    with zipfile.ZipFile(source_zip, "r") as source:
+        for info in source.infolist():
+            original_path = _safe_zip_path(info.filename)
+            if original_path is None:
+                warnings.append(info.filename)
+                continue
+
+            if info.is_dir():
+                directory_path = _safe_output_path(output_root, original_path)
+                directory_path.mkdir(parents=True, exist_ok=True)
+                continue
+
+            sequence += 1
+            folder_path = original_path.parent.as_posix()
+            if folder_path == ".":
+                folder_path = ""
+            new_name = f"{short_name_for_sequence(sequence)}{original_path.suffix}"
+            new_path = new_name if not folder_path else f"{folder_path}/{new_name}"
+            output_path = _unique_file_path(_safe_output_path(output_root, PurePosixPath(new_path)))
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+
+            with source.open(info) as original_file, output_path.open("wb") as extracted_file:
+                extracted_file.write(original_file.read())
+            mapping_rows.append(
+                {
+                    "FolderPath": folder_path or "[ZIP ROOT]",
+                    "GlobalSequence": str(sequence),
+                    "NewName": output_path.name,
+                    "NewPath": output_path.relative_to(output_root).as_posix(),
+                    "OriginalName": original_path.name,
+                    "OriginalPath": info.filename,
+                }
+            )
+
+    mapping_path = _unique_file_path(output_root / "Name_Mapping.csv")
+    mapping_path.write_text(_build_mapping_csv(mapping_rows), encoding="utf-8", newline="")
+
+    if warnings:
+        raise ZipExtractionWarning(output_folder, warnings)
+
+    return output_folder
+
+
+def _safe_zip_path(filename: str) -> PurePosixPath | None:
+    path = PurePosixPath(filename)
+    if path.is_absolute() or any(part in ("", "..") for part in path.parts):
+        return None
+    return path
+
+
+def _safe_output_path(output_root: Path, zip_path: PurePosixPath) -> Path:
+    target = output_root.joinpath(*zip_path.parts)
+    resolved = target.resolve(strict=False)
+    if resolved != output_root and output_root not in resolved.parents:
+        raise ValueError(f"Unsafe ZIP path skipped: {zip_path.as_posix()}")
+    return target
+
+
+def _unique_file_path(path: Path) -> Path:
+    if not path.exists():
+        return path
+
+    counter = 2
+    while True:
+        candidate = path.with_name(f"{path.stem} ({counter}){path.suffix}")
+        if not candidate.exists():
+            return candidate
+        counter += 1
 
 
 def _build_mapping_csv(mapping_rows: list[dict[str, str]]) -> str:
