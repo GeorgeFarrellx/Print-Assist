@@ -12,6 +12,8 @@ Current important repo files and raw GitHub links:
   https://raw.githubusercontent.com/GeorgeFarrellx/Print-Assist/main/print_assist/app.py
 - print_assist/file_utils.py  
   https://raw.githubusercontent.com/GeorgeFarrellx/Print-Assist/main/print_assist/file_utils.py
+- print_assist/zip_renamer.py
+  https://raw.githubusercontent.com/GeorgeFarrellx/Print-Assist/main/print_assist/zip_renamer.py
 - print_assist/pdf_builder.py  
   https://raw.githubusercontent.com/GeorgeFarrellx/Print-Assist/main/print_assist/pdf_builder.py
 - print_assist/office_converter.py  
