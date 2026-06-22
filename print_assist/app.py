@@ -18,7 +18,7 @@ from . import APP_NAME
 from .file_utils import ZIP_EXTENSIONS, default_output_path, filter_supported_files, get_supported_files_from_client_folder, get_supported_files_from_folder
 from .pdf_builder import build_combined_pdf
 from .preview_window import PreviewWindow
-from .zip_renamer import default_renamed_zip_path, rename_zip_contents, unique_zip_path
+from .zip_renamer import ZipExtractionWarning, default_extracted_folder_path, rename_and_extract_zip_contents, unique_folder_path
 
 
 class PrintAssistApp:
@@ -80,7 +80,7 @@ class PrintAssistApp:
         button_groups = [
             [("Add Files", self.add_files), ("Add Folder", self.add_folder), ("Add Client Folder", self.add_client_folder)],
             [("Remove Selected", self.remove_selected), ("Move Up", self.move_up), ("Move Down", self.move_down), ("Clear", self.clear_files)],
-            [("Choose Output", self.choose_output), ("Preview Print Assist PDF", self.create_preview), ("Rename ZIP Contents", self.rename_zip_contents), ("Open Output Folder", self.open_output_folder)],
+            [("Choose Output", self.choose_output), ("Preview Print Assist PDF", self.create_preview), ("Rename + Extract ZIP", self.rename_zip_contents), ("Open Output Folder", self.open_output_folder)],
         ]
 
         self.buttons: dict[str, ttk.Button] = {}
@@ -279,7 +279,7 @@ class PrintAssistApp:
             "Clear",
             "Choose Output",
             "Preview Print Assist PDF",
-            "Rename ZIP Contents",
+            "Rename + Extract ZIP",
         ]
         state = tk.NORMAL if enabled else tk.DISABLED
         for label in labels:
@@ -353,7 +353,7 @@ class PrintAssistApp:
 
         zip_files = [p for p in self.files if p.suffix.lower() in ZIP_EXTENSIONS]
         if zip_files:
-            messagebox.showerror(APP_NAME, "ZIP files cannot be previewed or printed directly. Use Rename ZIP Contents first, then extract or select printable files.")
+            messagebox.showerror(APP_NAME, "ZIP files cannot be previewed or printed directly. Use Rename + Extract ZIP first, then select printable files.")
             return
 
         if self.output_path is None:
@@ -415,41 +415,56 @@ class PrintAssistApp:
 
         outputs: list[Path] = []
         errors: list[str] = []
+        warnings: list[str] = []
 
         if len(zip_files) == 1:
             source_zip = zip_files[0]
-            default_path = default_renamed_zip_path(source_zip)
-            selected_output = filedialog.asksaveasfilename(
-                title="Save renamed ZIP",
-                defaultextension=".zip",
-                initialfile=default_path.name,
-                initialdir=str(default_path.parent),
-                filetypes=[("ZIP archives", "*.zip")],
+            selected_output = filedialog.askdirectory(
+                title="Choose extraction folder",
+                initialdir=str(source_zip.parent),
             )
             if not selected_output:
-                self.status_var.set("ZIP rename cancelled.")
+                self.status_var.set("ZIP rename and extract cancelled.")
                 return
-            output_zip = Path(selected_output)
+            output_folder = unique_folder_path(default_extracted_folder_path(source_zip, Path(selected_output)))
             try:
-                outputs.append(rename_zip_contents(source_zip, output_zip))
+                outputs.append(rename_and_extract_zip_contents(source_zip, output_folder))
+            except ZipExtractionWarning as exc:
+                outputs.append(exc.output_folder)
+                warnings.append(f"{source_zip.name}: {exc}")
             except Exception as exc:
                 errors.append(f"{source_zip.name}: {exc}")
         else:
+            selected_output = filedialog.askdirectory(
+                title="Choose parent extraction folder",
+                initialdir=str(zip_files[0].parent),
+            )
+            if not selected_output:
+                self.status_var.set("ZIP rename and extract cancelled.")
+                return
+            parent_output = Path(selected_output)
             for source_zip in zip_files:
-                output_zip = unique_zip_path(default_renamed_zip_path(source_zip))
+                output_folder = unique_folder_path(default_extracted_folder_path(source_zip, parent_output))
                 try:
-                    outputs.append(rename_zip_contents(source_zip, output_zip))
+                    outputs.append(rename_and_extract_zip_contents(source_zip, output_folder))
+                except ZipExtractionWarning as exc:
+                    outputs.append(exc.output_folder)
+                    warnings.append(f"{source_zip.name}: {exc}")
                 except Exception as exc:
                     errors.append(f"{source_zip.name}: {exc}")
 
         if outputs:
             output_text = "\n".join(str(p) for p in outputs)
-            self.status_var.set(f"Renamed {len(outputs)} ZIP file(s).")
-            messagebox.showinfo(APP_NAME, f"Renamed ZIP file(s) created:\n{output_text}")
+            self.status_var.set(f"Renamed and extracted {len(outputs)} ZIP file(s).")
+            messagebox.showinfo(APP_NAME, f"Renamed ZIP contents extracted to:\n{output_text}")
+
+        if warnings:
+            self.status_var.set("ZIP contents extracted with warnings.")
+            messagebox.showwarning(APP_NAME, "ZIP rename and extract warnings:\n" + "\n".join(warnings))
 
         if errors:
-            self.status_var.set("Some ZIP files could not be renamed.")
-            messagebox.showerror(APP_NAME, "ZIP rename errors:\n" + "\n".join(errors))
+            self.status_var.set("Some ZIP files could not be renamed and extracted.")
+            messagebox.showerror(APP_NAME, "ZIP rename and extract errors:\n" + "\n".join(errors))
 
     def open_output_folder(self) -> None:
         if self.output_path and self.output_path.parent.exists():
