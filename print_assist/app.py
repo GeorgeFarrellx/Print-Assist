@@ -15,9 +15,10 @@ except Exception:
     DND_FILES = None
 
 from . import APP_NAME
-from .file_utils import SUPPORTED_EXTENSIONS, default_output_path, filter_supported_files, get_supported_files_from_client_folder, get_supported_files_from_folder
+from .file_utils import ZIP_EXTENSIONS, default_output_path, filter_supported_files, get_supported_files_from_client_folder, get_supported_files_from_folder
 from .pdf_builder import build_combined_pdf
 from .preview_window import PreviewWindow
+from .zip_renamer import default_renamed_zip_path, rename_zip_contents, unique_zip_path
 
 
 class PrintAssistApp:
@@ -79,7 +80,7 @@ class PrintAssistApp:
         button_groups = [
             [("Add Files", self.add_files), ("Add Folder", self.add_folder), ("Add Client Folder", self.add_client_folder)],
             [("Remove Selected", self.remove_selected), ("Move Up", self.move_up), ("Move Down", self.move_down), ("Clear", self.clear_files)],
-            [("Choose Output", self.choose_output), ("Preview Print Assist PDF", self.create_preview), ("Open Output Folder", self.open_output_folder)],
+            [("Choose Output", self.choose_output), ("Preview Print Assist PDF", self.create_preview), ("Rename ZIP Contents", self.rename_zip_contents), ("Open Output Folder", self.open_output_folder)],
         ]
 
         self.buttons: dict[str, ttk.Button] = {}
@@ -113,7 +114,7 @@ class PrintAssistApp:
         self._append_paths(dropped_files, precomputed_unsupported=unsupported)
 
     def add_files(self) -> None:
-        types = [("PDF", "*.pdf"), ("Images", "*.jpg *.jpeg *.png *.bmp *.tif *.tiff"), ("Word documents", "*.doc *.docx"), ("Excel workbooks", "*.xls *.xlsx *.xlsm *.xlsb"), ("Outlook messages", "*.msg"), ("All files", "*.*")]
+        types = [("PDF", "*.pdf"), ("Images", "*.jpg *.jpeg *.png *.bmp *.tif *.tiff"), ("Word documents", "*.doc *.docx"), ("Excel workbooks", "*.xls *.xlsx *.xlsm *.xlsb"), ("Outlook messages", "*.msg"), ("ZIP archives", "*.zip"), ("All files", "*.*")]
         selected = filedialog.askopenfilenames(title="Select files", filetypes=types)
         self._append_paths(selected)
 
@@ -278,6 +279,7 @@ class PrintAssistApp:
             "Clear",
             "Choose Output",
             "Preview Print Assist PDF",
+            "Rename ZIP Contents",
         ]
         state = tk.NORMAL if enabled else tk.DISABLED
         for label in labels:
@@ -349,6 +351,11 @@ class PrintAssistApp:
             messagebox.showerror(APP_NAME, "Please add at least one supported file.")
             return
 
+        zip_files = [p for p in self.files if p.suffix.lower() in ZIP_EXTENSIONS]
+        if zip_files:
+            messagebox.showerror(APP_NAME, "ZIP files cannot be previewed or printed directly. Use Rename ZIP Contents first, then extract or select printable files.")
+            return
+
         if self.output_path is None:
             self.output_path = default_output_path(self.files)
             self.output_var.set(f"Output: {self.output_path}")
@@ -392,6 +399,57 @@ class PrintAssistApp:
 
         threading.Thread(target=worker, daemon=True).start()
         self.root.after(100, self._poll_preview_queue)
+
+    def rename_zip_contents(self) -> None:
+        selected_indices = list(self.listbox.curselection())
+        selected_zips = [self.files[i] for i in selected_indices if self.files[i].suffix.lower() in ZIP_EXTENSIONS]
+        zip_files = selected_zips or [p for p in self.files if p.suffix.lower() in ZIP_EXTENSIONS]
+
+        if not zip_files:
+            selected = filedialog.askopenfilenames(title="Select ZIP files", filetypes=[("ZIP archives", "*.zip")])
+            zip_files = [Path(p) for p in selected]
+
+        if not zip_files:
+            self.status_var.set("No ZIP files selected.")
+            return
+
+        outputs: list[Path] = []
+        errors: list[str] = []
+
+        if len(zip_files) == 1:
+            source_zip = zip_files[0]
+            default_path = default_renamed_zip_path(source_zip)
+            selected_output = filedialog.asksaveasfilename(
+                title="Save renamed ZIP",
+                defaultextension=".zip",
+                initialfile=default_path.name,
+                initialdir=str(default_path.parent),
+                filetypes=[("ZIP archives", "*.zip")],
+            )
+            if not selected_output:
+                self.status_var.set("ZIP rename cancelled.")
+                return
+            output_zip = Path(selected_output)
+            try:
+                outputs.append(rename_zip_contents(source_zip, output_zip))
+            except Exception as exc:
+                errors.append(f"{source_zip.name}: {exc}")
+        else:
+            for source_zip in zip_files:
+                output_zip = unique_zip_path(default_renamed_zip_path(source_zip))
+                try:
+                    outputs.append(rename_zip_contents(source_zip, output_zip))
+                except Exception as exc:
+                    errors.append(f"{source_zip.name}: {exc}")
+
+        if outputs:
+            output_text = "\n".join(str(p) for p in outputs)
+            self.status_var.set(f"Renamed {len(outputs)} ZIP file(s).")
+            messagebox.showinfo(APP_NAME, f"Renamed ZIP file(s) created:\n{output_text}")
+
+        if errors:
+            self.status_var.set("Some ZIP files could not be renamed.")
+            messagebox.showerror(APP_NAME, "ZIP rename errors:\n" + "\n".join(errors))
 
     def open_output_folder(self) -> None:
         if self.output_path and self.output_path.parent.exists():

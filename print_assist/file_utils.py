@@ -6,7 +6,9 @@ from typing import Iterable
 
 from . import APP_NAME
 
-SUPPORTED_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".doc", ".docx", ".xls", ".xlsx", ".xlsm", ".xlsb", ".msg"}
+PRINTABLE_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".doc", ".docx", ".xls", ".xlsx", ".xlsm", ".xlsb", ".msg"}
+ZIP_EXTENSIONS = {".zip"}
+SUPPORTED_EXTENSIONS = PRINTABLE_EXTENSIONS | ZIP_EXTENSIONS
 
 
 def filter_supported_files(paths: Iterable[str]) -> tuple[list[Path], list[Path]]:
