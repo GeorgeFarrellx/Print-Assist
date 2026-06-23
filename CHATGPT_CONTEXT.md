@@ -22,3 +22,7 @@ Current important repo files and raw GitHub links:
   https://raw.githubusercontent.com/GeorgeFarrellx/Print-Assist/main/requirements.txt
 - print_assist/preview_window.py  
   https://raw.githubusercontent.com/GeorgeFarrellx/Print-Assist/main/print_assist/preview_window.py
+- print_assist/windows_drop.py
+  https://raw.githubusercontent.com/GeorgeFarrellx/Print-Assist/main/print_assist/windows_drop.py
+- tests/test_windows_drop.py
+  https://raw.githubusercontent.com/GeorgeFarrellx/Print-Assist/main/tests/test_windows_drop.py

@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import threading
 import tkinter as tk
+from collections.abc import Iterable
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
@@ -18,7 +19,59 @@ from . import APP_NAME
 from .file_utils import ZIP_EXTENSIONS, default_output_path, filter_supported_files, get_supported_files_from_client_folder, get_supported_files_from_folder
 from .pdf_builder import build_combined_pdf
 from .preview_window import PreviewWindow
+from .windows_drop import (
+    NativeWindowsDropTarget,
+    WINDOWS_NATIVE_DROP_AVAILABLE,
+    ole_initialize,
+    ole_uninitialize,
+    register_drop_target,
+    revoke_drop_target,
+)
 from .zip_renamer import ZipExtractionWarning, default_extracted_folder_path, rename_and_extract_zip_contents, unique_folder_path
+
+
+_INVALID_WINDOWS_FILENAME_CHARS = set('<>:"/\\|?*')
+_RESERVED_WINDOWS_FILENAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+}
+
+
+def _safe_outlook_attachment_name(raw_name: str, fallback: str) -> str:
+    basename = str(raw_name or "").replace("\\", "/").rsplit("/", 1)[-1]
+    cleaned = "".join(
+        "_" if char in _INVALID_WINDOWS_FILENAME_CHARS or ord(char) < 32 else char
+        for char in basename
+    )
+    cleaned = cleaned.strip().rstrip(" .")
+    if cleaned in {"", ".", ".."}:
+        cleaned = fallback
+
+    stem = Path(cleaned).stem or cleaned
+    if stem.upper() in _RESERVED_WINDOWS_FILENAMES:
+        cleaned = f"_{cleaned}"
+
+    if len(cleaned) > 180:
+        suffix = Path(cleaned).suffix
+        stem = Path(cleaned).stem or fallback
+        cleaned = f"{stem[: max(1, 180 - len(suffix))]}{suffix}"
+    return cleaned
+
+
+def _unique_file_path(path: Path) -> Path:
+    if not path.exists():
+        return path
+
+    counter = 2
+    while True:
+        candidate = path.with_name(f"{path.stem} ({counter}){path.suffix}")
+        if not candidate.exists():
+            return candidate
+        counter += 1
 
 
 class PrintAssistApp:
@@ -37,7 +90,13 @@ class PrintAssistApp:
         self._preview_running = False
         self._preview_queue: queue.Queue[tuple[str, object]] | None = None
         self._preview_temp_dir_obj: tempfile.TemporaryDirectory[str] | None = None
+        self._outlook_drop_temp_dir_obj: tempfile.TemporaryDirectory[str] | None = None
+        self._native_windows_drop_hwnd: int | None = None
+        self._native_windows_drop_target: NativeWindowsDropTarget | None = None
+        self._native_windows_drop_target_com: object | None = None
+        self._windows_ole_initialized = ole_initialize()
 
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -63,14 +122,7 @@ class PrintAssistApp:
         list_frame.columnconfigure(0, weight=1)
         list_frame.rowconfigure(0, weight=1)
 
-        drag_drop_enabled = False
-        if DND_FILES is not None and hasattr(self.root, "drop_target_register") and hasattr(self.root, "dnd_bind"):
-            try:
-                self.root.drop_target_register(DND_FILES)
-                self.root.dnd_bind("<<Drop>>", self._on_drop)  # type: ignore[attr-defined]
-                drag_drop_enabled = True
-            except Exception:
-                drag_drop_enabled = False
+        drag_drop_enabled = self._wire_drag_drop()
         if not drag_drop_enabled:
             self.status_var.set("Use Add Files, Add Folder, or Add Client Folder")
 
@@ -97,21 +149,121 @@ class PrintAssistApp:
         ttk.Progressbar(frame, variable=self.progress_var, maximum=100).pack(fill=tk.X, pady=2)
         ttk.Label(frame, textvariable=self.status_var).pack(anchor="w", pady=(6, 0))
 
-    def _on_drop(self, event: tk.Event) -> None:
-        raw = self.root.tk.splitlist(event.data)
+    def _wire_drag_drop(self) -> bool:
+        if self._wire_native_windows_drop_target():
+            return True
+        return self._wire_tkinter_drop_target()
+
+    def _wire_native_windows_drop_target(self) -> bool:
+        if not WINDOWS_NATIVE_DROP_AVAILABLE or not self._windows_ole_initialized:
+            return False
+        try:
+            self.root.update_idletasks()
+            hwnd = int(self.listbox.winfo_id())
+            target = NativeWindowsDropTarget(
+                on_paths=self._handle_native_windows_drop_paths,
+                materialise_virtual_files=self._materialise_outlook_virtual_attachments,
+                on_error=self._show_native_drop_error,
+            )
+            wrapped = register_drop_target(hwnd, target)
+        except Exception:
+            self._teardown_native_windows_drop_target()
+            return False
+
+        if wrapped is None:
+            return False
+        self._native_windows_drop_hwnd = hwnd
+        self._native_windows_drop_target = target
+        self._native_windows_drop_target_com = wrapped
+        return True
+
+    def _wire_tkinter_drop_target(self) -> bool:
+        if DND_FILES is None or not hasattr(self.root, "drop_target_register") or not hasattr(self.root, "dnd_bind"):
+            return False
+        try:
+            self.root.drop_target_register(DND_FILES)
+            self.root.dnd_bind("<<Drop>>", self._on_drop)  # type: ignore[attr-defined]
+            return True
+        except Exception:
+            return False
+
+    def _teardown_native_windows_drop_target(self) -> None:
+        if self._native_windows_drop_hwnd is not None:
+            revoke_drop_target(self._native_windows_drop_hwnd)
+        self._native_windows_drop_hwnd = None
+        self._native_windows_drop_target = None
+        self._native_windows_drop_target_com = None
+
+    def _show_native_drop_error(self, details: str) -> None:
+        messagebox.showerror(
+            APP_NAME,
+            "The app couldn't read the dropped Outlook attachment.\n\n"
+            f"{details}",
+        )
+
+    def _handle_native_windows_drop_paths(self, paths: list[str]) -> None:
+        existing = [str(Path(p)) for p in (paths or []) if p and Path(p).exists()]
+        if not existing:
+            messagebox.showwarning(
+                APP_NAME,
+                "The dropped Outlook attachment could not be materialised into a local file.",
+            )
+            return
+        self._handle_dropped_paths(existing)
+
+    def _handle_dropped_paths(self, raw_paths: Iterable[str]) -> None:
         dropped_files: list[str] = []
         unsupported: list[Path] = []
 
-        for item in raw:
+        for item in raw_paths:
             path = Path(item)
             if path.is_dir():
                 supported, folder_unsupported = get_supported_files_from_folder(path)
                 dropped_files.extend(str(p) for p in supported)
                 unsupported.extend(folder_unsupported)
             else:
-                dropped_files.append(item)
+                dropped_files.append(str(path))
 
         self._append_paths(dropped_files, precomputed_unsupported=unsupported)
+
+    def _get_outlook_drop_temp_dir(self) -> Path:
+        if self._outlook_drop_temp_dir_obj is None:
+            self._outlook_drop_temp_dir_obj = tempfile.TemporaryDirectory(prefix="print_assist_outlook_drop_")
+        target_dir = Path(self._outlook_drop_temp_dir_obj.name) / "outlook_attachments"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        return target_dir
+
+    def _cleanup_outlook_drop_temp_dir(self) -> None:
+        if self._outlook_drop_temp_dir_obj is not None:
+            self._outlook_drop_temp_dir_obj.cleanup()
+            self._outlook_drop_temp_dir_obj = None
+
+    def _materialise_outlook_virtual_attachments(
+        self,
+        names: list[str],
+        payloads: Iterable[bytes | None],
+    ) -> list[str]:
+        target_dir = self._get_outlook_drop_temp_dir()
+        result: list[str] = []
+
+        for index, (name, payload) in enumerate(zip(names or [], payloads), start=1):
+            if payload is None:
+                continue
+            payload_bytes = bytes(payload)
+            fallback_name = f"attachment_{index}.bin"
+            safe_name = _safe_outlook_attachment_name(name, fallback_name)
+            if payload_bytes.startswith(b"%PDF") and Path(safe_name).suffix.lower() != ".pdf":
+                stem = Path(safe_name).stem or f"attachment_{index}"
+                safe_name = f"{stem}.pdf"
+            out_path = _unique_file_path(target_dir / safe_name)
+            out_path.write_bytes(payload_bytes)
+            result.append(str(out_path))
+
+        return result
+
+    def _on_drop(self, event: tk.Event) -> None:
+        raw = self.root.tk.splitlist(event.data)
+        self._handle_dropped_paths(raw)
 
     def add_files(self) -> None:
         types = [("PDF", "*.pdf"), ("Images", "*.jpg *.jpeg *.png *.bmp *.tif *.tiff"), ("Word documents", "*.doc *.docx"), ("Excel workbooks", "*.xls *.xlsx *.xlsm *.xlsb"), ("Outlook messages", "*.msg"), ("ZIP archives", "*.zip"), ("All files", "*.*")]
@@ -477,6 +629,15 @@ class PrintAssistApp:
             os.startfile(path)  # type: ignore[attr-defined]
         except Exception:
             subprocess.run(["xdg-open", str(path)], check=False)
+
+    def _on_close(self) -> None:
+        self._teardown_native_windows_drop_target()
+        if self._windows_ole_initialized:
+            ole_uninitialize()
+            self._windows_ole_initialized = False
+        self._cleanup_preview_temp_dir()
+        self._cleanup_outlook_drop_temp_dir()
+        self.root.destroy()
 
 
 def run(root: tk.Tk | None = None) -> None:
