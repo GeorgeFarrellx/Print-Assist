@@ -64,10 +64,11 @@ python main.py
 - `.msg` conversion includes email message content only; embedded `.msg` attachments are not automatically included and should be added separately as saved files.
 - Folder import reads direct child files only (subfolders are ignored in this version), which is useful for quickly loading files from an Outlook macro's saved Attachments folder.
 - Add Client Folder is designed for Outlook macro client folders where a saved `.msg` is in the parent folder and saved attachments are in an `Attachments` (or `Attachment` / `Email Attachments`) subfolder.
+- On Windows, Outlook attachments can be dragged directly from the Outlook app into the file list; Print Assist saves the dropped virtual attachment to a temporary file for the current session.
 
 ## Current limitations
 
-- Drag-and-drop supports files/folders via `tkinterdnd2` when available.
+- Drag-and-drop supports Windows Explorer files/folders and Outlook attachments on Windows, with `tkinterdnd2` used as a fallback when native Windows drag/drop is unavailable.
 - If drag/drop is unavailable in the local environment, Add Files, Add Folder, and Add Client Folder remain fully supported.
 - Word/Excel/MSG conversion requires installed Microsoft Office/Outlook on Windows.
 - Preview-window printing depends on Windows/default PDF print handling behavior.
@@ -77,4 +78,3 @@ python main.py
 
 - Direct print button
 - Save/load file batches
-- Integration with Outlook attachment saving workflow
