@@ -239,9 +239,12 @@ class NativeWindowsDropTarget:
         self._supports_current_drag = False
         try:
             paths = self._extract_paths(data_object)
+            self._on_paths(paths)
         except Exception as exc:
-            self._on_error(str(exc))
+            try:
+                self._on_error(str(exc))
+            except Exception:
+                pass
             return WINDOWS_DROPEFFECT_NONE
 
-        self._on_paths(paths)
         return WINDOWS_DROPEFFECT_COPY if paths else WINDOWS_DROPEFFECT_NONE

@@ -94,10 +94,12 @@ class PrintAssistApp:
         self._native_windows_drop_hwnd: int | None = None
         self._native_windows_drop_target: NativeWindowsDropTarget | None = None
         self._native_windows_drop_target_com: object | None = None
+        self._native_drop_queue: queue.Queue[tuple[str, object]] = queue.Queue()
         self._windows_ole_initialized = ole_initialize()
 
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._build_ui()
+        self.root.after(50, self._poll_native_drop_queue)
 
     def _build_ui(self) -> None:
         title = ttk.Label(self.root, text=APP_NAME, font=("Segoe UI", 18, "bold"))
@@ -161,9 +163,9 @@ class PrintAssistApp:
             self.root.update_idletasks()
             hwnd = int(self.listbox.winfo_id())
             target = NativeWindowsDropTarget(
-                on_paths=self._handle_native_windows_drop_paths,
+                on_paths=self._queue_native_drop_paths,
                 materialise_virtual_files=self._materialise_outlook_virtual_attachments,
-                on_error=self._show_native_drop_error,
+                on_error=self._queue_native_drop_error,
             )
             wrapped = register_drop_target(hwnd, target)
         except Exception:
@@ -193,6 +195,27 @@ class PrintAssistApp:
         self._native_windows_drop_hwnd = None
         self._native_windows_drop_target = None
         self._native_windows_drop_target_com = None
+
+    def _queue_native_drop_paths(self, paths: list[str]) -> None:
+        self._native_drop_queue.put(("paths", list(paths or [])))
+
+    def _queue_native_drop_error(self, details: str) -> None:
+        self._native_drop_queue.put(("error", str(details)))
+
+    def _poll_native_drop_queue(self) -> None:
+        while True:
+            try:
+                event_type, payload = self._native_drop_queue.get_nowait()
+            except queue.Empty:
+                break
+
+            if event_type == "paths":
+                self._handle_native_windows_drop_paths(payload)
+            elif event_type == "error":
+                self._show_native_drop_error(str(payload))
+
+        if self.root.winfo_exists():
+            self.root.after(50, self._poll_native_drop_queue)
 
     def _show_native_drop_error(self, details: str) -> None:
         messagebox.showerror(
