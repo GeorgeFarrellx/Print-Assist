@@ -30,13 +30,24 @@ def _choose_a4_orientation(width: float, height: float) -> tuple[float, float]:
     return A4_LANDSCAPE if width > height else A4_PORTRAIT
 
 
-def _add_pdf_pages(output_doc: fitz.Document, source_path: Path) -> None:
+def _add_pdf_pages(
+    output_doc: fitz.Document,
+    source_path: Path,
+    preserve_page_size: bool = False,
+) -> None:
     with fitz.open(source_path) as src_doc:
         for src_page in src_doc:
             src_rect = src_page.rect
-            page_w, page_h = _choose_a4_orientation(src_rect.width, src_rect.height)
+            if preserve_page_size:
+                page_w, page_h = src_rect.width, src_rect.height
+            else:
+                page_w, page_h = _choose_a4_orientation(src_rect.width, src_rect.height)
             out_page = output_doc.new_page(width=page_w, height=page_h)
-            target = _fit_rect(src_rect.width, src_rect.height, page_w, page_h, MARGIN)
+            target = (
+                out_page.rect
+                if preserve_page_size
+                else _fit_rect(src_rect.width, src_rect.height, page_w, page_h, MARGIN)
+            )
             out_page.show_pdf_page(target, src_doc, src_page.number)
 
 
@@ -58,10 +69,10 @@ def build_combined_pdf(
 ) -> tuple[list[str], list[str]]:
     processed: list[str] = []
     warnings: list[str] = []
-    output_doc = fitz.open()
-    try:
-        with tempfile.TemporaryDirectory(prefix="print_assist_") as temp_dir_raw:
-            temp_dir = Path(temp_dir_raw)
+    with tempfile.TemporaryDirectory(prefix="print_assist_") as temp_dir_raw:
+        temp_dir = Path(temp_dir_raw)
+        output_doc = fitz.open()
+        try:
             total_files = len(files)
             for index, file_path in enumerate(files, start=1):
                 try:
@@ -73,7 +84,11 @@ def build_combined_pdf(
                         _add_image_page(output_doc, file_path)
                     elif suffix in OFFICE_EXTENSIONS:
                         converted_pdf = convert_to_pdf_if_needed(file_path, temp_dir)
-                        _add_pdf_pages(output_doc, converted_pdf)
+                        _add_pdf_pages(
+                            output_doc,
+                            converted_pdf,
+                            preserve_page_size=suffix in MSG_EXTENSIONS,
+                        )
                     else:
                         raise ValueError(f"Unsupported file extension: {file_path.suffix}")
                     end_page = len(output_doc)
@@ -99,6 +114,8 @@ def build_combined_pdf(
                 raise ValueError("No files were successfully processed.")
 
             output_doc.save(output_path)
-        return processed, warnings
-    finally:
-        output_doc.close()
+        finally:
+            # Close the combined document before TemporaryDirectory cleanup.
+            # PyMuPDF can retain source PDF handles until this point on Windows.
+            output_doc.close()
+    return processed, warnings

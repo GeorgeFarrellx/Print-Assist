@@ -7,6 +7,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pythoncom
+
 from print_assist.app import PrintAssistApp
 from print_assist.windows_drop import NativeWindowsDropTarget
 
@@ -54,6 +56,27 @@ class _MultipleAttachmentDataObject:
         if clipboard_format == self.contents_format and 0 <= index < len(self.attachment_payloads):
             return SimpleNamespace(data=self.attachment_payloads[index])
         raise RuntimeError("unsupported format")
+
+
+class _StorageDataObject:
+    def __init__(self, contents_format: int, storage_tymed: int, storage: object) -> None:
+        self.contents_format = contents_format
+        self.storage_tymed = storage_tymed
+        self.storage = storage
+
+    def QueryGetData(self, format_etc: tuple[object, None, int, int, int]) -> None:
+        clipboard_format, _, _, index, tymed = format_etc
+        if (
+            clipboard_format == self.contents_format
+            and index == 0
+            and tymed == self.storage_tymed
+        ):
+            return
+        raise RuntimeError("unsupported format")
+
+    def GetData(self, format_etc: tuple[object, None, int, int, int]) -> SimpleNamespace:
+        self.QueryGetData(format_etc)
+        return SimpleNamespace(data=self.storage)
 
 
 def _unicode_descriptor_payload(names: list[str]) -> bytes:
@@ -147,6 +170,33 @@ class WindowsDropTests(unittest.TestCase):
             self.assertEqual(errors, [])
             self.assertEqual([Path(path).name for path in received_paths], names)
             self.assertEqual([Path(path).read_bytes() for path in received_paths], payloads)
+
+    def test_outlook_msg_istorage_payload_is_serialised_to_compound_file_bytes(self) -> None:
+        contents_format = 1003
+        storage_tymed = 8
+        lock_bytes = pythoncom.CreateILockBytesOnHGlobal()
+        source_storage = pythoncom.StgCreateDocfileOnILockBytes(lock_bytes, 0x1012, 0)
+        stream = source_storage.CreateStream("__properties_version1.0", 0x1012, 0, 0)
+        stream.Write(b"message properties")
+        stream = None
+        source_storage.Commit(0)
+        data_object = _StorageDataObject(contents_format, storage_tymed, source_storage)
+
+        with (
+            patch("print_assist.windows_drop.WINDOWS_FILECONTENTS", contents_format),
+            patch("print_assist.windows_drop.WINDOWS_TYMED_ISTREAM", 4),
+            patch("print_assist.windows_drop.WINDOWS_TYMED_ISTORAGE", storage_tymed),
+            patch("print_assist.windows_drop.WINDOWS_TYMED_HGLOBAL", 1),
+        ):
+            target = NativeWindowsDropTarget(
+                on_paths=lambda paths: None,
+                materialise_virtual_files=lambda names, payloads: [],
+                on_error=lambda details: None,
+            )
+            payload = target._read_virtual_file_bytes(data_object, 0)
+
+        self.assertIsNotNone(payload)
+        self.assertTrue(payload.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"))
 
     def test_drop_handler_exception_is_contained_at_com_boundary(self) -> None:
         errors: list[str] = []

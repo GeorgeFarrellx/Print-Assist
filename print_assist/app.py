@@ -16,7 +16,15 @@ except Exception:
     DND_FILES = None
 
 from . import APP_NAME
-from .file_utils import ZIP_EXTENSIONS, default_output_path, filter_supported_files, get_supported_files_from_client_folder, get_supported_files_from_folder
+from .file_utils import (
+    PRINTABLE_EXTENSIONS,
+    ZIP_EXTENSIONS,
+    default_output_path,
+    filter_supported_files,
+    get_supported_files_from_client_folder,
+    get_supported_files_from_folder,
+)
+from .outlook_message import extract_msg_attachments, safe_outlook_attachment_name, unique_file_path
 from .pdf_builder import build_combined_pdf
 from .preview_window import PreviewWindow
 from .windows_drop import (
@@ -28,50 +36,6 @@ from .windows_drop import (
     revoke_drop_target,
 )
 from .zip_renamer import ZipExtractionWarning, default_extracted_folder_path, rename_and_extract_zip_contents, unique_folder_path
-
-
-_INVALID_WINDOWS_FILENAME_CHARS = set('<>:"/\\|?*')
-_RESERVED_WINDOWS_FILENAMES = {
-    "CON",
-    "PRN",
-    "AUX",
-    "NUL",
-    *(f"COM{i}" for i in range(1, 10)),
-    *(f"LPT{i}" for i in range(1, 10)),
-}
-
-
-def _safe_outlook_attachment_name(raw_name: str, fallback: str) -> str:
-    basename = str(raw_name or "").replace("\\", "/").rsplit("/", 1)[-1]
-    cleaned = "".join(
-        "_" if char in _INVALID_WINDOWS_FILENAME_CHARS or ord(char) < 32 else char
-        for char in basename
-    )
-    cleaned = cleaned.strip().rstrip(" .")
-    if cleaned in {"", ".", ".."}:
-        cleaned = fallback
-
-    stem = Path(cleaned).stem or cleaned
-    if stem.upper() in _RESERVED_WINDOWS_FILENAMES:
-        cleaned = f"_{cleaned}"
-
-    if len(cleaned) > 180:
-        suffix = Path(cleaned).suffix
-        stem = Path(cleaned).stem or fallback
-        cleaned = f"{stem[: max(1, 180 - len(suffix))]}{suffix}"
-    return cleaned
-
-
-def _unique_file_path(path: Path) -> Path:
-    if not path.exists():
-        return path
-
-    counter = 2
-    while True:
-        candidate = path.with_name(f"{path.stem} ({counter}){path.suffix}")
-        if not candidate.exists():
-            return candidate
-        counter += 1
 
 
 class PrintAssistApp:
@@ -108,7 +72,7 @@ class PrintAssistApp:
         frame = ttk.Frame(self.root, padding=12)
         frame.pack(fill=tk.BOTH, expand=True)
 
-        list_label = ttk.Label(frame, text="Drop files/folders here, or use Add Files / Add Folder / Add Client Folder:")
+        list_label = ttk.Label(frame, text="Drop files, folders, or Outlook email messages here:")
         list_label.pack(anchor="w")
 
         list_frame = ttk.Frame(frame)
@@ -220,7 +184,7 @@ class PrintAssistApp:
     def _show_native_drop_error(self, details: str) -> None:
         messagebox.showerror(
             APP_NAME,
-            "The app couldn't read the dropped Outlook attachment.\n\n"
+            "The app couldn't read the dropped Outlook item.\n\n"
             f"{details}",
         )
 
@@ -229,7 +193,7 @@ class PrintAssistApp:
         if not existing:
             messagebox.showwarning(
                 APP_NAME,
-                "The dropped Outlook attachment could not be materialised into a local file.",
+                "The dropped Outlook item could not be materialised into a local file.",
             )
             return
         self._handle_dropped_paths(existing)
@@ -274,11 +238,11 @@ class PrintAssistApp:
                 continue
             payload_bytes = bytes(payload)
             fallback_name = f"attachment_{index}.bin"
-            safe_name = _safe_outlook_attachment_name(name, fallback_name)
+            safe_name = safe_outlook_attachment_name(name, fallback_name)
             if payload_bytes.startswith(b"%PDF") and Path(safe_name).suffix.lower() != ".pdf":
                 stem = Path(safe_name).stem or f"attachment_{index}"
                 safe_name = f"{stem}.pdf"
-            out_path = _unique_file_path(target_dir / safe_name)
+            out_path = unique_file_path(target_dir / safe_name)
             out_path.write_bytes(payload_bytes)
             result.append(str(out_path))
 
@@ -299,27 +263,10 @@ class PrintAssistApp:
             return
 
         supported, unsupported = get_supported_files_from_folder(Path(selected_folder))
-        added = 0
-        for p in supported:
-            if p not in self.files:
-                self.files.append(p)
-                self.listbox.insert(tk.END, str(p))
-                added += 1
-
-        if added and self.output_path is None:
-            self.output_path = default_output_path(self.files)
-            self.output_var.set(f"Output: {self.output_path}")
-
-        if added:
-            self._update_file_count()
-
-        if unsupported:
-            display_unsupported = unsupported[:20]
-            warning_msg = "Unsupported files skipped:\n" + "\n".join(u.name for u in display_unsupported)
-            remaining = len(unsupported) - len(display_unsupported)
-            if remaining > 0:
-                warning_msg += f"\n...and {remaining} more unsupported file(s)."
-            messagebox.showwarning(APP_NAME, warning_msg)
+        added = self._append_paths(
+            [str(path) for path in supported],
+            precomputed_unsupported=unsupported,
+        )
 
         if added:
             self.status_var.set(f"Added {added} file(s) from folder.")
@@ -335,27 +282,10 @@ class PrintAssistApp:
             return
 
         supported, unsupported = get_supported_files_from_client_folder(Path(selected_folder))
-        added = 0
-        for p in supported:
-            if p not in self.files:
-                self.files.append(p)
-                self.listbox.insert(tk.END, str(p))
-                added += 1
-
-        if added and self.output_path is None:
-            self.output_path = default_output_path(self.files)
-            self.output_var.set(f"Output: {self.output_path}")
-
-        if added:
-            self._update_file_count()
-
-        if unsupported:
-            display_unsupported = unsupported[:20]
-            warning_msg = "Unsupported files skipped:\n" + "\n".join(u.name for u in display_unsupported)
-            remaining = len(unsupported) - len(display_unsupported)
-            if remaining > 0:
-                warning_msg += f"\n...and {remaining} more unsupported file(s)."
-            messagebox.showwarning(APP_NAME, warning_msg)
+        added = self._append_paths(
+            [str(path) for path in supported],
+            precomputed_unsupported=unsupported,
+        )
 
         if added:
             self.status_var.set(f"Added {added} file(s) from client folder.")
@@ -364,31 +294,101 @@ class PrintAssistApp:
         else:
             self.status_var.set("No supported files found in the selected client folder.")
 
-    def _append_paths(self, raw_paths: tuple[str, ...] | list[str], precomputed_unsupported: list[Path] | None = None) -> None:
+    def _expand_outlook_message_paths(
+        self,
+        paths: list[Path],
+        max_nested_depth: int = 5,
+    ) -> tuple[list[Path], list[Path], list[str]]:
+        expanded: list[Path] = []
+        unsupported: list[Path] = []
+        warnings: list[str] = []
+        visited_messages: set[Path] = set()
+        attachment_dir = self._get_outlook_drop_temp_dir() / "message_attachments"
+
+        def add_path(path: Path, depth: int) -> None:
+            expanded.append(path)
+            if path.suffix.lower() != ".msg":
+                return
+
+            try:
+                message_key = path.resolve()
+            except OSError:
+                message_key = path
+            if message_key in visited_messages:
+                return
+            visited_messages.add(message_key)
+
+            try:
+                attachments, attachment_warnings = extract_msg_attachments(path, attachment_dir)
+                warnings.extend(f"{path.name}: {warning}" for warning in attachment_warnings)
+            except Exception as exc:
+                warnings.append(f"Could not include attachments from '{path.name}': {exc}")
+                return
+
+            for attachment_path in attachments:
+                suffix = attachment_path.suffix.lower()
+                if suffix not in PRINTABLE_EXTENSIONS:
+                    unsupported.append(attachment_path)
+                    continue
+                if suffix == ".msg":
+                    if depth >= max_nested_depth:
+                        expanded.append(attachment_path)
+                        warnings.append(
+                            f"Nested attachment limit reached for '{attachment_path.name}'; "
+                            "its own attachments were not expanded."
+                        )
+                    else:
+                        add_path(attachment_path, depth + 1)
+                else:
+                    expanded.append(attachment_path)
+
+        for path in paths:
+            add_path(path, 0)
+
+        return expanded, unsupported, warnings
+
+    def _append_paths(
+        self,
+        raw_paths: tuple[str, ...] | list[str],
+        precomputed_unsupported: list[Path] | None = None,
+    ) -> int:
         supported, unsupported = filter_supported_files(raw_paths)
         if precomputed_unsupported:
             unsupported = list(unsupported) + precomputed_unsupported
+
+        new_supported = [path for path in supported if path not in self.files]
+        expanded, message_unsupported, message_warnings = self._expand_outlook_message_paths(new_supported)
+        unsupported = list(unsupported) + message_unsupported
+
         added = 0
-        for p in supported:
+        for p in expanded:
             if p not in self.files:
                 self.files.append(p)
                 self.listbox.insert(tk.END, str(p))
                 added += 1
 
         if added and self.output_path is None:
-            self.output_path = default_output_path(self.files)
+            self.output_path = default_output_path(new_supported or self.files)
             self.output_var.set(f"Output: {self.output_path}")
 
+        warning_sections: list[str] = []
         if unsupported:
             display_unsupported = unsupported[:20]
-            warning_msg = "Unsupported files skipped:\n" + "\n".join(u.name for u in display_unsupported)
+            warning_msg = "Unsupported or non-printable attachments skipped:\n" + "\n".join(
+                u.name for u in display_unsupported
+            )
             remaining = len(unsupported) - len(display_unsupported)
             if remaining > 0:
                 warning_msg += f"\n...and {remaining} more unsupported file(s)."
-            messagebox.showwarning(APP_NAME, warning_msg)
+            warning_sections.append(warning_msg)
+        if message_warnings:
+            warning_sections.append("Outlook message warnings:\n" + "\n".join(message_warnings))
+        if warning_sections:
+            messagebox.showwarning(APP_NAME, "\n\n".join(warning_sections))
 
         self._update_file_count()
         self.status_var.set(f"{len(self.files)} file(s) selected.")
+        return added
 
     def _update_file_count(self) -> None:
         self.file_count_var.set(f"Selected files: {len(self.files)}")

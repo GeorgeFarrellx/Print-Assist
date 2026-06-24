@@ -50,6 +50,9 @@ python main.py
 - Preview generation runs in a background worker so the main window stays responsive during longer conversions.
 - Preview progress now updates per file with status text showing which file is being processed.
 - Preview is shown in-app with page navigation and zoom, and displays the source file name for the current page when available.
+- Image pages can be cropped interactively in the preview by dragging around the area to keep.
+- Outlook email pages can be trimmed at a selected horizontal line; later pages belonging to that same `.msg` are removed while separately listed attachments remain.
+- Preview edits are non-destructive and include Undo Edit and Reset Edits controls.
 - Preview includes a File Summary window listing source file order, type, page range, page count, and full source path.
 - "Save Final PDF" copies the exact preview PDF to the selected output path so reviewed pages match saved output.
 - "Print Preview PDF" sends the exact generated preview PDF to Windows/default PDF print handling after confirmation.
@@ -59,12 +62,13 @@ python main.py
 - PDF pages are fitted onto A4 (portrait/landscape chosen automatically), centered, no cropping.
 - Images are placed one per A4 page (portrait/landscape chosen automatically), centered, no cropping.
 - Word/Excel/MSG files are converted to temporary PDFs first, then added to the combined output PDF.
-- `.msg` conversion uses Outlook to export email header/body content to a temporary MHT/MHTML file, then uses Word to convert that file to PDF.
+- `.msg` conversion uses Outlook's native Memo Style printing through Microsoft Print to PDF, preserving the same account heading, message fields, rules, page size, and page numbering as printing from Outlook.
+- Adding or dropping a `.msg` automatically places the email first, followed by its visible printable attachments in Outlook order.
+- Nested attached `.msg` emails are expanded up to five levels. Hidden inline/signature images and unsupported attachments are skipped.
 - Excel output may span multiple pages based on workbook print areas and page setup.
-- `.msg` conversion includes email message content only; embedded `.msg` attachments are not automatically included and should be added separately as saved files.
 - Folder import reads direct child files only (subfolders are ignored in this version), which is useful for quickly loading files from an Outlook macro's saved Attachments folder.
 - Add Client Folder is designed for Outlook macro client folders where a saved `.msg` is in the parent folder and saved attachments are in an `Attachments` (or `Attachment` / `Email Attachments`) subfolder.
-- On Windows, Outlook attachments can be dragged directly from the Outlook app into the file list; Print Assist saves the dropped virtual attachment to a temporary file for the current session.
+- On Windows, whole Outlook email messages and individual Outlook attachments can be dragged directly into the file list; Print Assist saves the dropped virtual item to a temporary file for the current session.
 
 ## Current limitations
 

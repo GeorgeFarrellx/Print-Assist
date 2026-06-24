@@ -55,6 +55,10 @@ WINDOWS_CF_HDROP = getattr(win32con, "CF_HDROP", 15) if win32con else 15
 WINDOWS_DVASPECT_CONTENT = getattr(pythoncom, "DVASPECT_CONTENT", 1) if pythoncom else 1
 WINDOWS_TYMED_HGLOBAL = getattr(pythoncom, "TYMED_HGLOBAL", 1) if pythoncom else 1
 WINDOWS_TYMED_ISTREAM = getattr(pythoncom, "TYMED_ISTREAM", 4) if pythoncom else 4
+WINDOWS_TYMED_ISTORAGE = getattr(pythoncom, "TYMED_ISTORAGE", 8) if pythoncom else 8
+WINDOWS_STGM_CREATE_READWRITE_EXCLUSIVE = 0x1000 | 0x0002 | 0x0010
+WINDOWS_STATFLAG_NONAME = 1
+WINDOWS_STGC_DEFAULT = 0
 
 
 PathHandler = Callable[[list[str]], None]
@@ -204,6 +208,35 @@ class NativeWindowsDropTarget:
             except Exception:
                 pass
 
+        # Outlook commonly exposes whole dragged email messages as IStorage
+        # compound files rather than IStream data. Copy the storage into an
+        # in-memory docfile, then return its complete .msg byte representation.
+        if self._query_get_data(data_object, WINDOWS_FILECONTENTS, WINDOWS_TYMED_ISTORAGE, index=index):
+            source_storage = None
+            destination_storage = None
+            lock_bytes = None
+            try:
+                medium = data_object.GetData(
+                    self._format_etc(WINDOWS_FILECONTENTS, WINDOWS_TYMED_ISTORAGE, index=index)
+                )
+                source_storage = medium.data
+                lock_bytes = pythoncom.CreateILockBytesOnHGlobal()
+                destination_storage = pythoncom.StgCreateDocfileOnILockBytes(
+                    lock_bytes,
+                    WINDOWS_STGM_CREATE_READWRITE_EXCLUSIVE,
+                    0,
+                )
+                source_storage.CopyTo([], None, destination_storage)
+                destination_storage.Commit(WINDOWS_STGC_DEFAULT)
+                size = int(lock_bytes.Stat(WINDOWS_STATFLAG_NONAME)[2])
+                return bytes(lock_bytes.ReadAt(0, size))
+            except Exception:
+                pass
+            finally:
+                source_storage = None
+                destination_storage = None
+                lock_bytes = None
+
         if self._query_get_data(data_object, WINDOWS_FILECONTENTS, WINDOWS_TYMED_HGLOBAL, index=index):
             try:
                 medium = data_object.GetData(
@@ -223,7 +256,13 @@ class NativeWindowsDropTarget:
         if not names:
             return []
         payloads = (self._read_virtual_file_bytes(data_object, index) for index in range(len(names)))
-        return self._materialise_virtual_files(names, payloads)
+        paths = self._materialise_virtual_files(names, payloads)
+        if not paths:
+            raise RuntimeError(
+                "Outlook supplied the item name but not a readable file payload "
+                "(tried IStream, IStorage, and HGLOBAL formats)."
+            )
+        return paths
 
     def DragEnter(self, data_object: object, key_state: int, point: object, effect: int) -> int:
         self._supports_current_drag = self._supports_drag(data_object)
