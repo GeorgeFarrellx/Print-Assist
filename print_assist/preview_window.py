@@ -58,6 +58,71 @@ def _update_manifest_after_page_removal(
     return updated
 
 
+def _update_manifest_after_single_page_deletion(
+    file_manifest: list[dict[str, object]],
+    target_entry_index: int,
+    deleted_page: int,
+) -> list[dict[str, object]]:
+    updated = copy.deepcopy(file_manifest)
+    target = updated[target_entry_index]
+    start_page = target.get("output_start_page")
+    end_page = target.get("output_end_page")
+    if (
+        not isinstance(start_page, int)
+        or not isinstance(end_page, int)
+        or not start_page <= deleted_page <= end_page
+    ):
+        raise ValueError("The source page range is unavailable.")
+
+    remaining_count = end_page - start_page
+    if remaining_count > 0:
+        target["output_end_page"] = end_page - 1
+        target["output_page_count"] = remaining_count
+    else:
+        # Keep the source in File Summary while showing that it no longer
+        # contributes a page to the edited preview.
+        target["output_start_page"] = None
+        target["output_end_page"] = None
+        target["output_page_count"] = 0
+
+    for entry in updated[target_entry_index + 1 :]:
+        entry_start = entry.get("output_start_page")
+        entry_end = entry.get("output_end_page")
+        if isinstance(entry_start, int):
+            entry["output_start_page"] = entry_start - 1
+        if isinstance(entry_end, int):
+            entry["output_end_page"] = entry_end - 1
+    return updated
+
+
+def _format_preview_page_status(
+    page_number: int,
+    total_pages: int,
+    file_manifest: list[dict[str, object]],
+) -> str:
+    prefix = f"Overall page {page_number} of {total_pages}"
+    for entry in file_manifest:
+        start_page = entry.get("output_start_page")
+        end_page = entry.get("output_end_page")
+        if (
+            not isinstance(start_page, int)
+            or not isinstance(end_page, int)
+            or not start_page <= page_number <= end_page
+        ):
+            continue
+
+        source_name = entry.get("source_name")
+        file_page = page_number - start_page + 1
+        file_page_count = end_page - start_page + 1
+        if isinstance(source_name, str) and source_name:
+            return (
+                f"{prefix} — {source_name} — "
+                f"File page {file_page} of {file_page_count}"
+            )
+        return f"{prefix} — File page {file_page} of {file_page_count}"
+    return prefix
+
+
 class PreviewWindow:
     def __init__(
         self,
@@ -142,6 +207,11 @@ class PreviewWindow:
             text="Trim Email Below Line",
             command=self.start_email_trim,
         )
+        self.delete_page_btn = ttk.Button(
+            edit_buttons,
+            text="Delete Current Page",
+            command=self.delete_current_page,
+        )
         self.undo_btn = ttk.Button(edit_buttons, text="Undo Edit", command=self.undo_edit)
         self.reset_btn = ttk.Button(edit_buttons, text="Reset Edits", command=self.reset_edits)
         ttk.Button(edit_buttons, text="Zoom Out", command=self.zoom_out).pack(side=tk.LEFT, padx=4, pady=4)
@@ -150,6 +220,7 @@ class PreviewWindow:
         self.next_btn.pack(side=tk.LEFT, padx=4, pady=4)
         self.crop_image_btn.pack(side=tk.LEFT, padx=4, pady=4)
         self.trim_email_btn.pack(side=tk.LEFT, padx=4, pady=4)
+        self.delete_page_btn.pack(side=tk.LEFT, padx=4, pady=4)
         self.undo_btn.pack(side=tk.LEFT, padx=4, pady=4)
         self.reset_btn.pack(side=tk.LEFT, padx=4, pady=4)
         ttk.Button(output_buttons, text="Save Final PDF", command=self.save_final_pdf).pack(side=tk.RIGHT, padx=4, pady=4)
@@ -175,11 +246,9 @@ class PreviewWindow:
 
         total = len(self.doc)
         page_number = self.page_index + 1
-        source_name = self._get_source_name_for_page(page_number)
-        if source_name:
-            self.page_var.set(f"Page {page_number} of {total} — Source: {source_name}")
-        else:
-            self.page_var.set(f"Page {page_number} of {total}")
+        self.page_var.set(
+            _format_preview_page_status(page_number, total, self.file_manifest)
+        )
         self.prev_btn.configure(state=tk.NORMAL if self.page_index > 0 else tk.DISABLED)
         self.next_btn.configure(state=tk.NORMAL if self.page_index < total - 1 else tk.DISABLED)
         self._update_edit_controls()
@@ -220,6 +289,9 @@ class PreviewWindow:
         )
         self.trim_email_btn.configure(
             state=tk.NORMAL if source_extension == ".msg" else tk.DISABLED
+        )
+        self.delete_page_btn.configure(
+            state=tk.NORMAL if len(self.doc) > 1 else tk.DISABLED
         )
         self.undo_btn.configure(state=tk.NORMAL if self._undo_stack else tk.DISABLED)
         has_edits = bool(self._undo_stack) or self.file_manifest != self._original_manifest
@@ -454,6 +526,52 @@ class PreviewWindow:
             source.close()
         self.on_status_change("Email thread trimmed in preview")
 
+    def delete_current_page(self) -> None:
+        if len(self.doc) <= 1:
+            messagebox.showinfo(
+                "Print Assist",
+                "The only remaining page cannot be deleted.",
+                parent=self.window,
+            )
+            return
+
+        try:
+            self._apply_page_deletion()
+        except Exception as exc:
+            messagebox.showerror(
+                "Print Assist",
+                f"Could not delete this preview page:\n{exc}",
+                parent=self.window,
+            )
+
+    def _apply_page_deletion(self) -> None:
+        match = self._get_manifest_entry_for_page(self.page_index + 1)
+        if match is None:
+            raise ValueError("The source for this page could not be identified.")
+        entry_index, _entry = match
+        deleted_page = self.page_index + 1
+
+        self._push_undo_state()
+        source = fitz.open(stream=self._undo_stack[-1][0], filetype="pdf")
+        edited = fitz.open()
+        try:
+            self._insert_page_range(edited, source, 0, self.page_index - 1)
+            self._insert_page_range(edited, source, self.page_index + 1, len(source) - 1)
+            new_manifest = _update_manifest_after_single_page_deletion(
+                self.file_manifest,
+                entry_index,
+                deleted_page,
+            )
+            new_page_index = min(self.page_index, len(source) - 2)
+            self._replace_preview_document(edited, new_manifest, new_page_index)
+        except Exception:
+            edited.close()
+            self._undo_stack.pop()
+            raise
+        finally:
+            source.close()
+        self.on_status_change("Current page deleted from preview only")
+
     def _restore_pdf_state(
         self,
         pdf_bytes: bytes,
@@ -475,7 +593,7 @@ class PreviewWindow:
             return
         reset = messagebox.askyesno(
             "Print Assist",
-            "Reset all image crops and email trims?",
+            "Reset all image crops, email trims, and deleted pages?",
             parent=self.window,
         )
         if not reset:
@@ -531,7 +649,11 @@ class PreviewWindow:
         for idx, entry in enumerate(self.file_manifest, start=1):
             start_page = entry.get("output_start_page", "")
             end_page = entry.get("output_end_page", "")
-            page_range = f"{start_page}-{end_page}" if start_page != "" and end_page != "" else ""
+            page_range = (
+                f"{start_page}-{end_page}"
+                if isinstance(start_page, int) and isinstance(end_page, int)
+                else "Deleted from preview"
+            )
             tree.insert(
                 "",
                 tk.END,
