@@ -62,7 +62,7 @@ python main.py
 - PDF pages are fitted onto A4 (portrait/landscape chosen automatically), centered, no cropping.
 - Images are placed one per A4 page (portrait/landscape chosen automatically), centered, no cropping.
 - Word/Excel/MSG files are converted to temporary PDFs first, then added to the combined output PDF.
-- `.msg` conversion uses Outlook's native Memo Style printing through Microsoft Print to PDF, preserving the same account heading, message fields, rules, page size, and page numbering as printing from Outlook.
+- `.msg` conversion uses an unattended Outlook-to-Word export styled to closely match Outlook's Memo Style, so large email batches can be previewed without a Microsoft Print to PDF save dialog for every message.
 - Adding or dropping a `.msg` automatically places the email first, followed by its visible printable attachments in Outlook order.
 - Nested attached `.msg` emails are expanded up to five levels. Hidden inline/signature images and unsupported attachments are skipped.
 - Excel output may span multiple pages based on workbook print areas and page setup.

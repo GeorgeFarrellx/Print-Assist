@@ -7,12 +7,38 @@ from unittest.mock import patch
 
 import fitz
 
-from print_assist.office_converter import convert_to_pdf_if_needed
+from print_assist.office_converter import (
+    OfficeConversionSession,
+    _memo_heading_from_message,
+    convert_to_pdf_if_needed,
+)
 from print_assist.pdf_builder import _add_pdf_pages
 
 
 class OfficeConverterTests(unittest.TestCase):
-    def test_msg_conversion_uses_outlook_memo_style_printer(self) -> None:
+    def test_memo_heading_uses_first_message_recipient(self) -> None:
+        message = type("Message", (), {"To": "Parkers Accountancy; George Farrell"})()
+
+        self.assertEqual(_memo_heading_from_message(message), "Parkers Accountancy")
+
+    def test_memo_heading_has_safe_fallback(self) -> None:
+        message = type("Message", (), {"To": ""})()
+
+        self.assertEqual(_memo_heading_from_message(message), "Outlook Email")
+
+    def test_batch_conversion_uses_unique_output_names(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session = OfficeConversionSession(Path(temp_dir))
+            with patch.object(session, "_msg_to_pdf") as converter:
+                first = session.convert(Path("first") / "message.msg")
+                second = session.convert(Path("second") / "message.msg")
+
+        self.assertEqual(first.name, "0001_message.converted.pdf")
+        self.assertEqual(second.name, "0002_message.converted.pdf")
+        self.assertNotEqual(first, second)
+        self.assertEqual(converter.call_count, 2)
+
+    def test_msg_conversion_uses_unattended_outlook_converter(self) -> None:
         source = Path("message.msg")
 
         with tempfile.TemporaryDirectory() as temp_dir, patch(
