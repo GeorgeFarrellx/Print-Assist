@@ -25,7 +25,6 @@ Print Assist is a Windows-first Python desktop app that combines mixed printable
 - Choose output location/name.
 - Create an in-app preview of one combined PDF with A4-fitted pages.
 - Save the final combined PDF from the preview window.
-- Print the preview PDF from the preview window.
 - Open preview or saved PDF externally.
 - Open output folder.
 
@@ -56,7 +55,6 @@ python main.py
 - The current preview page can be deleted without changing or deleting its source file, document, email, or attachment.
 - Preview includes a File Summary window listing source file order, type, page range, page count, and full source path.
 - "Save Final PDF" copies the exact preview PDF to the selected output path so reviewed pages match saved output.
-- "Print Preview PDF" sends the exact generated preview PDF to Windows/default PDF print handling after confirmation.
 - Preview should match final output as closely as possible because both use the same combined-PDF generation process.
 - Output defaults to: `Print Assist - YYYYMMDD_HHMMSS.pdf`
 - If all selected files come from one folder, that folder is used as default save location.
