@@ -23,7 +23,7 @@ jobs:
     
     - name: Build EXE with PyInstaller
       run: |
-        pyinstaller --onefile --windowed --name PrintAssist main.py
+        pyinstaller --onefile --windowed --hidden-import win32timezone --name PrintAssist main.py
     
     - name: Upload EXE artifact
       uses: actions/upload-artifact@v4

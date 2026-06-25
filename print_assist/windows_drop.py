@@ -9,6 +9,8 @@ if os.name == "nt":
         import pythoncom
         import win32clipboard
         import win32con
+        # PyIStorage.CopyTo loads this lazily; keep it explicit for PyInstaller.
+        import win32timezone as _win32timezone
         from win32com.server.util import wrap as win32com_wrap
         from win32com.shell import shell
     except Exception:
