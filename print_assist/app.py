@@ -24,6 +24,7 @@ from .file_utils import (
     get_supported_files_from_client_folder,
     get_supported_files_from_folder,
 )
+from .mouse_scroll import bind_mouse_scroll
 from .outlook_message import extract_msg_attachments, safe_outlook_attachment_name, unique_file_path
 from .pdf_builder import build_combined_pdf
 from .preview_window import PreviewWindow
@@ -126,6 +127,7 @@ class PrintAssistApp:
         x_scrollbar = ttk.Scrollbar(list_frame, orient=tk.HORIZONTAL, command=self.listbox.xview)
         x_scrollbar.grid(row=1, column=0, sticky="ew")
         self.listbox.configure(yscrollcommand=y_scrollbar.set, xscrollcommand=x_scrollbar.set)
+        bind_mouse_scroll(self.listbox)
         list_frame.columnconfigure(0, weight=1)
         list_frame.rowconfigure(0, weight=1)
 

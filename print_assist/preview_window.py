@@ -11,6 +11,8 @@ from tkinter import messagebox, ttk
 import fitz
 from PIL import Image, ImageTk
 
+from .mouse_scroll import bind_mouse_scroll
+
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
 EDIT_MARGIN = 24
 MIN_CROP_SCREEN_PIXELS = 12
@@ -187,6 +189,7 @@ class PreviewWindow:
         self.h_scroll.grid(row=1, column=0, sticky="ew")
         self.canvas_frame.rowconfigure(0, weight=1)
         self.canvas_frame.columnconfigure(0, weight=1)
+        bind_mouse_scroll(self.canvas)
         self.canvas.bind("<ButtonPress-1>", self._on_canvas_press)
         self.canvas.bind("<B1-Motion>", self._on_canvas_drag)
         self.canvas.bind("<ButtonRelease-1>", self._on_canvas_release)
@@ -643,6 +646,7 @@ class PreviewWindow:
         tree.grid(row=0, column=0, sticky="nsew")
         y_scroll.grid(row=0, column=1, sticky="ns")
         x_scroll.grid(row=1, column=0, sticky="ew")
+        bind_mouse_scroll(tree)
         container.rowconfigure(0, weight=1)
         container.columnconfigure(0, weight=1)
 
