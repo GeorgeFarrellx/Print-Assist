@@ -79,6 +79,46 @@ class _StorageDataObject:
         return SimpleNamespace(data=self.storage)
 
 
+class _GenericComInterface:
+    def __init__(self, storage: object) -> None:
+        self.storage = storage
+        self.requested_iids: list[object] = []
+
+    def QueryInterface(self, iid: object) -> object:
+        self.requested_iids.append(iid)
+        if iid == pythoncom.IID_IStorage:
+            return self.storage
+        raise RuntimeError("unsupported interface")
+
+
+class _CombinedStorageDataObject:
+    def __init__(
+        self,
+        contents_format: int,
+        combined_tymed: int,
+        storage_tymed: int,
+        storage: object,
+    ) -> None:
+        self.contents_format = contents_format
+        self.combined_tymed = combined_tymed
+        self.storage_tymed = storage_tymed
+        self.generic_interface = _GenericComInterface(storage)
+
+    def QueryGetData(self, format_etc: tuple[object, None, int, int, int]) -> None:
+        clipboard_format, _, _, index, tymed = format_etc
+        if (
+            clipboard_format == self.contents_format
+            and index == 0
+            and tymed == self.combined_tymed
+        ):
+            return
+        raise RuntimeError("request all supported media together")
+
+    def GetData(self, format_etc: tuple[object, None, int, int, int]) -> SimpleNamespace:
+        self.QueryGetData(format_etc)
+        return SimpleNamespace(data=self.generic_interface, tymed=self.storage_tymed)
+
+
 def _unicode_descriptor_payload(names: list[str]) -> bytes:
     descriptors = []
     for name in names:
@@ -197,6 +237,46 @@ class WindowsDropTests(unittest.TestCase):
 
         self.assertIsNotNone(payload)
         self.assertTrue(payload.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"))
+
+    def test_outlook_msg_accepts_combined_tymed_and_generic_istorage_interface(self) -> None:
+        contents_format = 1003
+        stream_tymed = 4
+        storage_tymed = 8
+        hglobal_tymed = 1
+        combined_tymed = stream_tymed | storage_tymed | hglobal_tymed
+        lock_bytes = pythoncom.CreateILockBytesOnHGlobal()
+        source_storage = pythoncom.StgCreateDocfileOnILockBytes(lock_bytes, 0x1012, 0)
+        stream = source_storage.CreateStream("__properties_version1.0", 0x1012, 0, 0)
+        stream.Write(b"message properties")
+        stream = None
+        source_storage.Commit(0)
+        data_object = _CombinedStorageDataObject(
+            contents_format,
+            combined_tymed,
+            storage_tymed,
+            source_storage,
+        )
+
+        with (
+            patch("print_assist.windows_drop.WINDOWS_FILECONTENTS", contents_format),
+            patch("print_assist.windows_drop.WINDOWS_TYMED_ISTREAM", stream_tymed),
+            patch("print_assist.windows_drop.WINDOWS_TYMED_ISTORAGE", storage_tymed),
+            patch("print_assist.windows_drop.WINDOWS_TYMED_HGLOBAL", hglobal_tymed),
+            patch("print_assist.windows_drop.WINDOWS_IID_ISTORAGE", pythoncom.IID_IStorage),
+        ):
+            target = NativeWindowsDropTarget(
+                on_paths=lambda paths: None,
+                materialise_virtual_files=lambda names, payloads: [],
+                on_error=lambda details: None,
+            )
+            payload = target._read_virtual_file_bytes(data_object, 0)
+
+        self.assertIsNotNone(payload)
+        self.assertTrue(payload.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"))
+        self.assertEqual(
+            data_object.generic_interface.requested_iids,
+            [pythoncom.IID_IStorage],
+        )
 
     def test_drop_handler_exception_is_contained_at_com_boundary(self) -> None:
         errors: list[str] = []

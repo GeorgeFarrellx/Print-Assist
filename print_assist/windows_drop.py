@@ -56,6 +56,8 @@ WINDOWS_DVASPECT_CONTENT = getattr(pythoncom, "DVASPECT_CONTENT", 1) if pythonco
 WINDOWS_TYMED_HGLOBAL = getattr(pythoncom, "TYMED_HGLOBAL", 1) if pythoncom else 1
 WINDOWS_TYMED_ISTREAM = getattr(pythoncom, "TYMED_ISTREAM", 4) if pythoncom else 4
 WINDOWS_TYMED_ISTORAGE = getattr(pythoncom, "TYMED_ISTORAGE", 8) if pythoncom else 8
+WINDOWS_IID_ISTREAM = getattr(pythoncom, "IID_IStream", None) if pythoncom else None
+WINDOWS_IID_ISTORAGE = getattr(pythoncom, "IID_IStorage", None) if pythoncom else None
 WINDOWS_STGM_CREATE_READWRITE_EXCLUSIVE = 0x1000 | 0x0002 | 0x0010
 WINDOWS_STATFLAG_NONAME = 1
 WINDOWS_STGC_DEFAULT = 0
@@ -190,61 +192,106 @@ class NativeWindowsDropTarget:
                 continue
         return []
 
-    def _read_virtual_file_bytes(self, data_object: object, index: int) -> bytes | None:
-        if self._query_get_data(data_object, WINDOWS_FILECONTENTS, WINDOWS_TYMED_ISTREAM, index=index):
-            try:
-                medium = data_object.GetData(
-                    self._format_etc(WINDOWS_FILECONTENTS, WINDOWS_TYMED_ISTREAM, index=index)
-                )
-                stream = medium.data
-                stream.Seek(0, 0)
-                chunks = []
-                while True:
-                    chunk = stream.Read(65536)
-                    if not chunk:
-                        break
-                    chunks.append(chunk)
-                return b"".join(chunks)
-            except Exception:
-                pass
+    @staticmethod
+    def _as_com_interface(value: object, iid: object | None) -> object:
+        if value is None or iid is None or not hasattr(value, "QueryInterface"):
+            return value
+        try:
+            return value.QueryInterface(iid)
+        except Exception:
+            return value
 
-        # Outlook commonly exposes whole dragged email messages as IStorage
-        # compound files rather than IStream data. Copy the storage into an
-        # in-memory docfile, then return its complete .msg byte representation.
-        if self._query_get_data(data_object, WINDOWS_FILECONTENTS, WINDOWS_TYMED_ISTORAGE, index=index):
+    def _read_stream_bytes(self, value: object) -> bytes | None:
+        try:
+            stream = self._as_com_interface(value, WINDOWS_IID_ISTREAM)
+            stream.Seek(0, 0)
+            chunks = []
+            while True:
+                chunk = stream.Read(65536)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            return b"".join(chunks)
+        except Exception:
+            return None
+
+    def _read_storage_bytes(self, value: object) -> bytes | None:
+        # Whole Outlook messages are commonly supplied as an IStorage compound
+        # file. Real Outlook can expose the STGMEDIUM value as IUnknown, so
+        # explicitly query it for IStorage before copying it to a docfile.
+        source_storage = None
+        destination_storage = None
+        lock_bytes = None
+        try:
+            source_storage = self._as_com_interface(value, WINDOWS_IID_ISTORAGE)
+            lock_bytes = pythoncom.CreateILockBytesOnHGlobal()
+            destination_storage = pythoncom.StgCreateDocfileOnILockBytes(
+                lock_bytes,
+                WINDOWS_STGM_CREATE_READWRITE_EXCLUSIVE,
+                0,
+            )
+            source_storage.CopyTo([], None, destination_storage)
+            destination_storage.Commit(WINDOWS_STGC_DEFAULT)
+            size = int(lock_bytes.Stat(WINDOWS_STATFLAG_NONAME)[2])
+            return bytes(lock_bytes.ReadAt(0, size))
+        except Exception:
+            return None
+        finally:
             source_storage = None
             destination_storage = None
             lock_bytes = None
-            try:
-                medium = data_object.GetData(
-                    self._format_etc(WINDOWS_FILECONTENTS, WINDOWS_TYMED_ISTORAGE, index=index)
-                )
-                source_storage = medium.data
-                lock_bytes = pythoncom.CreateILockBytesOnHGlobal()
-                destination_storage = pythoncom.StgCreateDocfileOnILockBytes(
-                    lock_bytes,
-                    WINDOWS_STGM_CREATE_READWRITE_EXCLUSIVE,
-                    0,
-                )
-                source_storage.CopyTo([], None, destination_storage)
-                destination_storage.Commit(WINDOWS_STGC_DEFAULT)
-                size = int(lock_bytes.Stat(WINDOWS_STATFLAG_NONAME)[2])
-                return bytes(lock_bytes.ReadAt(0, size))
-            except Exception:
-                pass
-            finally:
-                source_storage = None
-                destination_storage = None
-                lock_bytes = None
 
-        if self._query_get_data(data_object, WINDOWS_FILECONTENTS, WINDOWS_TYMED_HGLOBAL, index=index):
+    def _read_medium_bytes(self, medium: object, requested_tymed: int) -> bytes | None:
+        actual_tymed = int(getattr(medium, "tymed", requested_tymed))
+        value = getattr(medium, "data", None)
+
+        if actual_tymed & WINDOWS_TYMED_ISTREAM:
+            payload = self._read_stream_bytes(value)
+            if payload is not None:
+                return payload
+        if actual_tymed & WINDOWS_TYMED_ISTORAGE:
+            payload = self._read_storage_bytes(value)
+            if payload is not None:
+                return payload
+        if actual_tymed & WINDOWS_TYMED_HGLOBAL:
             try:
-                medium = data_object.GetData(
-                    self._format_etc(WINDOWS_FILECONTENTS, WINDOWS_TYMED_HGLOBAL, index=index)
-                )
-                return bytes(medium.data or b"")
+                return bytes(value or b"")
             except Exception:
                 pass
+        return None
+
+    def _read_virtual_file_bytes(self, data_object: object, index: int) -> bytes | None:
+        # FORMATETC.tymed is a bitmask. Asking for all supported media together
+        # lets Outlook choose the representation it can render for this item.
+        # Keep individual requests as fallbacks for stricter data providers.
+        combined_tymed = (
+            WINDOWS_TYMED_ISTREAM
+            | WINDOWS_TYMED_ISTORAGE
+            | WINDOWS_TYMED_HGLOBAL
+        )
+        attempted: set[int] = set()
+        for requested_tymed in (
+            combined_tymed,
+            WINDOWS_TYMED_ISTREAM,
+            WINDOWS_TYMED_ISTORAGE,
+            WINDOWS_TYMED_HGLOBAL,
+        ):
+            if requested_tymed in attempted:
+                continue
+            attempted.add(requested_tymed)
+            try:
+                medium = data_object.GetData(
+                    self._format_etc(
+                        WINDOWS_FILECONTENTS,
+                        requested_tymed,
+                        index=index,
+                    )
+                )
+            except Exception:
+                continue
+            payload = self._read_medium_bytes(medium, requested_tymed)
+            if payload is not None:
+                return payload
         return None
 
     def _extract_paths(self, data_object: object) -> list[str]:
