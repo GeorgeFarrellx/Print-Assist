@@ -127,7 +127,7 @@ def _format_preview_page_status(
 class PreviewWindow:
     def __init__(
         self,
-        parent: tk.Tk,
+        parent: tk.Misc,
         preview_pdf_path: Path,
         output_path: Path,
         open_pdf_callback,
@@ -157,17 +157,17 @@ class PreviewWindow:
         self._original_pdf_bytes = self.doc.tobytes(garbage=4, deflate=True)
         self._original_manifest = copy.deepcopy(self.file_manifest)
 
-        self.window = tk.Toplevel(parent)
-        self.window.title("Print Assist Preview")
-        self.window.geometry("1000x760")
-        self.window.minsize(640, 480)
-        self.window.protocol("WM_DELETE_WINDOW", self.close)
+        self.frame = ttk.Frame(parent)
+        self.frame.pack(fill=tk.BOTH, expand=True)
 
         self._build_ui()
         self._render_page()
 
     def _build_ui(self) -> None:
-        top = ttk.Frame(self.window, padding=8)
+        self.preview_view = ttk.Frame(self.frame)
+        self.preview_view.pack(fill=tk.BOTH, expand=True)
+
+        top = ttk.Frame(self.preview_view, padding=8)
         top.pack(fill=tk.X)
 
         self.page_var = tk.StringVar(value="")
@@ -175,7 +175,7 @@ class PreviewWindow:
 
         ttk.Label(top, text=f"Output: {self.output_path}").pack(side=tk.RIGHT)
 
-        self.canvas_frame = ttk.Frame(self.window)
+        self.canvas_frame = ttk.Frame(self.preview_view)
         self.canvas_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
 
         self.canvas = tk.Canvas(self.canvas_frame, background="#202020", highlightthickness=0)
@@ -193,7 +193,7 @@ class PreviewWindow:
         self.canvas.bind("<B1-Motion>", self._on_canvas_drag)
         self.canvas.bind("<ButtonRelease-1>", self._on_canvas_release)
 
-        buttons = ttk.Frame(self.window, padding=(8, 0, 8, 8))
+        buttons = ttk.Frame(self.preview_view, padding=(8, 0, 8, 8))
         buttons.pack(fill=tk.X)
 
         edit_buttons = ttk.Frame(buttons)
@@ -232,10 +232,10 @@ class PreviewWindow:
         ttk.Button(output_buttons, text="Save Final PDF", command=self.save_final_pdf).pack(side=tk.RIGHT, padx=4, pady=4)
         ttk.Button(output_buttons, text="File Summary", command=self.open_file_summary).pack(side=tk.RIGHT, padx=4, pady=4)
         ttk.Button(output_buttons, text="Open Preview Externally", command=self.open_preview_externally).pack(side=tk.RIGHT, padx=4, pady=4)
-        ttk.Button(output_buttons, text="Close", command=self.close).pack(side=tk.RIGHT, padx=4, pady=4)
+        ttk.Button(output_buttons, text="Back to Files", command=self.close).pack(side=tk.RIGHT, padx=4, pady=4)
 
         self.edit_var = tk.StringVar(value="")
-        ttk.Label(self.window, textvariable=self.edit_var, padding=(12, 0, 12, 8)).pack(anchor="w")
+        ttk.Label(self.preview_view, textvariable=self.edit_var, padding=(12, 0, 12, 8)).pack(anchor="w")
 
     def _render_page(self) -> None:
         self._cancel_edit_mode()
@@ -389,7 +389,7 @@ class PreviewWindow:
                 messagebox.showinfo(
                     "Print Assist",
                     "Drag a larger rectangle around the image area to keep.",
-                    parent=self.window,
+                    parent=self.parent,
                 )
                 return
             clip = fitz.Rect(
@@ -404,7 +404,7 @@ class PreviewWindow:
                 messagebox.showerror(
                     "Print Assist",
                     f"Could not crop this image page:\n{exc}",
-                    parent=self.window,
+                    parent=self.parent,
                 )
         else:
             try:
@@ -413,7 +413,7 @@ class PreviewWindow:
                 messagebox.showerror(
                     "Print Assist",
                     f"Could not trim this email page:\n{exc}",
-                    parent=self.window,
+                    parent=self.parent,
                 )
 
     def _push_undo_state(self) -> None:
@@ -536,7 +536,7 @@ class PreviewWindow:
             messagebox.showinfo(
                 "Print Assist",
                 "The only remaining page cannot be deleted.",
-                parent=self.window,
+                parent=self.parent,
             )
             return
 
@@ -546,7 +546,7 @@ class PreviewWindow:
             messagebox.showerror(
                 "Print Assist",
                 f"Could not delete this preview page:\n{exc}",
-                parent=self.window,
+                parent=self.parent,
             )
 
     def _apply_page_deletion(self) -> None:
@@ -599,7 +599,7 @@ class PreviewWindow:
         reset = messagebox.askyesno(
             "Print Assist",
             "Reset all image crops, email trims, and deleted pages?",
-            parent=self.window,
+            parent=self.parent,
         )
         if not reset:
             return
@@ -617,12 +617,22 @@ class PreviewWindow:
         self.on_status_change("All preview edits reset")
 
     def open_file_summary(self) -> None:
-        summary_window = tk.Toplevel(self.window)
-        summary_window.title("File Summary")
-        summary_window.geometry("980x340")
-        summary_window.minsize(700, 220)
+        self.preview_view.pack_forget()
+        self.summary_view = ttk.Frame(self.frame)
+        self.summary_view.pack(fill=tk.BOTH, expand=True)
 
-        container = ttk.Frame(summary_window, padding=8)
+        header = ttk.Frame(self.summary_view, padding=(8, 8, 8, 0))
+        header.pack(fill=tk.X)
+        ttk.Label(header, text="File Summary", font=("Segoe UI", 14, "bold")).pack(
+            side=tk.LEFT
+        )
+        ttk.Button(
+            header,
+            text="Back to Preview",
+            command=self.close_file_summary,
+        ).pack(side=tk.RIGHT)
+
+        container = ttk.Frame(self.summary_view, padding=8)
         container.pack(fill=tk.BOTH, expand=True)
 
         columns = ("order", "name", "type", "range", "count", "path")
@@ -673,6 +683,12 @@ class PreviewWindow:
                 ),
             )
 
+    def close_file_summary(self) -> None:
+        if hasattr(self, "summary_view"):
+            self.summary_view.destroy()
+            del self.summary_view
+        self.preview_view.pack(fill=tk.BOTH, expand=True)
+
     def prev_page(self) -> None:
         if self.page_index > 0:
             self.page_index -= 1
@@ -693,7 +709,7 @@ class PreviewWindow:
 
     def save_final_pdf(self) -> None:
         if self.output_path.exists():
-            overwrite = messagebox.askyesno("Print Assist", f"Output file exists. Overwrite?\n{self.output_path}", parent=self.window)
+            overwrite = messagebox.askyesno("Print Assist", f"Output file exists. Overwrite?\n{self.output_path}", parent=self.parent)
             if not overwrite:
                 return
 
@@ -702,7 +718,7 @@ class PreviewWindow:
         self.saved_final = True
         self.on_status_change("Final PDF saved")
 
-        open_now = messagebox.askyesno("Print Assist", f"Final PDF saved:\n{self.output_path}\n\nOpen now?", parent=self.window)
+        open_now = messagebox.askyesno("Print Assist", f"Final PDF saved:\n{self.output_path}\n\nOpen now?", parent=self.parent)
         if open_now:
             self.open_pdf_callback(self.output_path)
 
@@ -714,5 +730,5 @@ class PreviewWindow:
             return
         self._closed = True
         self.doc.close()
-        self.window.destroy()
+        self.frame.destroy()
         self.on_close_callback()

@@ -189,6 +189,9 @@ class PrintAssistApp:
         self._preview_running = False
         self._preview_queue: queue.Queue[tuple[str, object]] | None = None
         self._preview_temp_dir_obj: tempfile.TemporaryDirectory[str] | None = None
+        self._preview_view: PreviewWindow | None = None
+        self._main_window_geometry = "900x560"
+        self._main_window_minsize = self.root.minsize()
         self._outlook_drop_temp_dir_obj: tempfile.TemporaryDirectory[str] | None = None
         self._native_windows_drop_hwnd: int | None = None
         self._native_windows_drop_target: NativeWindowsDropTarget | None = None
@@ -201,10 +204,13 @@ class PrintAssistApp:
         self.root.after(50, self._poll_native_drop_queue)
 
     def _build_ui(self) -> None:
-        title = ttk.Label(self.root, text=APP_NAME, font=("Segoe UI", 18, "bold"))
+        self.main_view = ttk.Frame(self.root)
+        self.main_view.pack(fill=tk.BOTH, expand=True)
+
+        title = ttk.Label(self.main_view, text=APP_NAME, font=("Segoe UI", 18, "bold"))
         title.pack(pady=(12, 8))
 
-        frame = ttk.Frame(self.root, padding=12)
+        frame = ttk.Frame(self.main_view, padding=12)
         frame.pack(fill=tk.BOTH, expand=True)
 
         list_label = ttk.Label(frame, text="Drop files, folders, or Outlook email messages here:")
@@ -754,6 +760,40 @@ class PrintAssistApp:
             self._preview_temp_dir_obj.cleanup()
             self._preview_temp_dir_obj = None
 
+    def _show_preview(
+        self,
+        preview_pdf: Path,
+        file_manifest: list[dict[str, object]],
+    ) -> None:
+        self._main_window_geometry = self.root.geometry()
+        self._main_window_minsize = self.root.minsize()
+        self.main_view.pack_forget()
+        self.root.title(f"{APP_NAME} - Preview")
+        self.root.geometry("1000x760")
+        self.root.minsize(640, 480)
+        try:
+            self._preview_view = PreviewWindow(
+                parent=self.root,
+                preview_pdf_path=preview_pdf,
+                output_path=self.output_path,
+                open_pdf_callback=self.open_pdf,
+                on_status_change=self.status_var.set,
+                on_close_callback=self._restore_main_view,
+                file_manifest=file_manifest,
+            )
+        except Exception:
+            self._restore_main_view()
+            raise
+
+    def _restore_main_view(self) -> None:
+        self._preview_view = None
+        self._cleanup_preview_temp_dir()
+        self.root.title(APP_NAME)
+        self.root.minsize(*self._main_window_minsize)
+        self.root.geometry(self._main_window_geometry)
+        self.main_view.pack(fill=tk.BOTH, expand=True)
+        self.status_var.set("Preview closed")
+
     def _poll_preview_queue(self) -> None:
         if self._preview_queue is None:
             return
@@ -782,16 +822,12 @@ class PrintAssistApp:
                     self.status_var.set("Error")
                     return
                 self.status_var.set("Preview ready")
-                preview_window = PreviewWindow(
-                    parent=self.root,
-                    preview_pdf_path=preview_pdf,
-                    output_path=self.output_path,
-                    open_pdf_callback=self.open_pdf,
-                    on_status_change=self.status_var.set,
-                    on_close_callback=self._cleanup_preview_temp_dir,
-                    file_manifest=file_manifest,
-                )
-                _ = preview_window
+                try:
+                    self._show_preview(preview_pdf, file_manifest)
+                except Exception as exc:
+                    self.progress_var.set(0)
+                    self.status_var.set("Error")
+                    messagebox.showerror(APP_NAME, f"Failed to open preview:\n{exc}")
                 return
             elif event_type == "error":
                 self._preview_running = False
@@ -942,6 +978,8 @@ class PrintAssistApp:
             subprocess.run(["xdg-open", str(path)], check=False)
 
     def _on_close(self) -> None:
+        if self._preview_view is not None:
+            self._preview_view.close()
         self._teardown_native_windows_drop_target()
         if self._windows_ole_initialized:
             ole_uninitialize()

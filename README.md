@@ -26,7 +26,7 @@ Print Assist is a Windows-first Python desktop app that combines mixed printable
 - Remove selected files or clear all.
 - Choose output location/name.
 - Create an in-app preview of one combined PDF with A4-fitted pages.
-- Save the final combined PDF from the preview window.
+- Save the final combined PDF from the in-window preview.
 - Open preview or saved PDF externally.
 - Open output folder.
 
@@ -55,7 +55,7 @@ python main.py
 - Outlook email pages can be trimmed at a selected horizontal line; later pages belonging to that same `.msg` are removed while separately listed attachments remain.
 - Preview edits are non-destructive and include Undo Edit and Reset Edits controls.
 - The current preview page can be deleted without changing or deleting its source file, document, email, or attachment.
-- Preview includes a File Summary window listing source file order, type, page range, page count, and full source path.
+- Preview includes an in-window File Summary view listing source file order, type, page range, page count, and full source path.
 - "Save Final PDF" copies the exact preview PDF to the selected output path so reviewed pages match saved output.
 - Preview should match final output as closely as possible because both use the same combined-PDF generation process.
 - Output defaults to: `Print Assist - YYYYMMDD_HHMMSS.pdf`
@@ -76,7 +76,7 @@ python main.py
 - Drag-and-drop supports Windows Explorer files/folders and Outlook attachments on Windows, with `tkinterdnd2` used as a fallback when native Windows drag/drop is unavailable.
 - If drag/drop is unavailable in the local environment, Add Files, Add Folder, and Add Client Folder remain fully supported.
 - Word/Excel/MSG conversion requires installed Microsoft Office/Outlook on Windows.
-- Preview-window printing depends on Windows/default PDF print handling behavior.
+- External PDF printing depends on Windows/default PDF print handling behavior.
 - Printer selection, duplex, tray selection, paper selection, and other advanced print options are not implemented yet.
 
 ## Planned future enhancements
