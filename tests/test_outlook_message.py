@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from print_assist.app import PrintAssistApp
+from print_assist.app import PrintAssistApp, format_file_selection_summary
 from print_assist.outlook_message import _save_visible_attachments
 
 
@@ -40,6 +40,34 @@ class _Attachments:
 
 
 class OutlookMessageTests(unittest.TestCase):
+    def test_file_summary_separates_emails_and_extracted_attachments(self) -> None:
+        outlook_temp_dir = Path("temp") / "outlook"
+        files = [
+            *(Path(f"email_{index}.msg") for index in range(5)),
+            *(outlook_temp_dir / "message_attachments" / f"attachment_{index}.pdf" for index in range(4)),
+        ]
+
+        summary = format_file_selection_summary(files, outlook_temp_dir)
+
+        self.assertEqual(summary, "Selected: 5 emails + 4 attachments")
+
+    def test_file_summary_includes_other_files_for_mixed_selection(self) -> None:
+        outlook_temp_dir = Path("temp") / "outlook"
+        files = [
+            Path("email.msg"),
+            outlook_temp_dir / "message_attachments" / "attachment.pdf",
+            Path("manually-added.pdf"),
+        ]
+
+        summary = format_file_selection_summary(files, outlook_temp_dir)
+
+        self.assertEqual(summary, "Selected: 1 email + 1 attachment + 1 other file")
+
+    def test_file_summary_stays_simple_without_outlook_items(self) -> None:
+        summary = format_file_selection_summary([Path("one.pdf"), Path("two.jpg")])
+
+        self.assertEqual(summary, "Selected files: 2")
+
     def test_visible_attachments_are_saved_and_hidden_inline_images_are_skipped(self) -> None:
         message = SimpleNamespace(
             Attachments=_Attachments(

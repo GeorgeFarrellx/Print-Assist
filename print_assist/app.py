@@ -38,6 +38,47 @@ from .windows_drop import (
 from .zip_renamer import ZipExtractionWarning, default_extracted_folder_path, rename_and_extract_zip_contents, unique_folder_path
 
 
+def _pluralised_count(count: int, singular: str, plural: str | None = None) -> str:
+    label = singular if count == 1 else (plural or f"{singular}s")
+    return f"{count} {label}"
+
+
+def _path_is_within(path: Path, directory: Path) -> bool:
+    try:
+        path.resolve().relative_to(directory.resolve())
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def format_file_selection_summary(
+    files: Iterable[Path],
+    outlook_temp_dir: Path | None = None,
+) -> str:
+    selected = list(files)
+    email_count = sum(path.suffix.lower() == ".msg" for path in selected)
+    attachment_count = 0
+
+    if outlook_temp_dir is not None:
+        attachment_count = sum(
+            path.suffix.lower() != ".msg" and _path_is_within(path, outlook_temp_dir)
+            for path in selected
+        )
+
+    if email_count == 0 and attachment_count == 0:
+        return f"Selected files: {len(selected)}"
+
+    other_count = len(selected) - email_count - attachment_count
+    parts: list[str] = []
+    if email_count:
+        parts.append(_pluralised_count(email_count, "email"))
+    if attachment_count:
+        parts.append(_pluralised_count(attachment_count, "attachment"))
+    if other_count:
+        parts.append(_pluralised_count(other_count, "other file"))
+    return f"Selected: {' + '.join(parts)}"
+
+
 class PrintAssistApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
@@ -391,7 +432,10 @@ class PrintAssistApp:
         return added
 
     def _update_file_count(self) -> None:
-        self.file_count_var.set(f"Selected files: {len(self.files)}")
+        outlook_temp_dir = None
+        if self._outlook_drop_temp_dir_obj is not None:
+            outlook_temp_dir = Path(self._outlook_drop_temp_dir_obj.name)
+        self.file_count_var.set(format_file_selection_summary(self.files, outlook_temp_dir))
 
     def remove_selected(self) -> None:
         indices = list(self.listbox.curselection())
