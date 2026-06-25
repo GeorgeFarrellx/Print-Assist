@@ -7,6 +7,7 @@ import tempfile
 import threading
 import tkinter as tk
 from collections.abc import Iterable
+from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
@@ -25,7 +26,7 @@ from .file_utils import (
     get_supported_files_from_folder,
 )
 from .mouse_scroll import bind_mouse_scroll
-from .outlook_message import extract_msg_attachments, safe_outlook_attachment_name, unique_file_path
+from .outlook_message import extract_msg_details, safe_outlook_attachment_name, unique_file_path
 from .pdf_builder import build_combined_pdf
 from .preview_window import PreviewWindow
 from .windows_drop import (
@@ -37,6 +38,10 @@ from .windows_drop import (
     revoke_drop_target,
 )
 from .zip_renamer import ZipExtractionWarning, default_extracted_folder_path, rename_and_extract_zip_contents, unique_folder_path
+
+SORT_MANUAL = "Manual order"
+SORT_FILENAME = "File name (A–Z)"
+SORT_EMAIL_DATE = "Email date (oldest first)"
 
 
 def _pluralised_count(count: int, singular: str, plural: str | None = None) -> str:
@@ -116,6 +121,53 @@ def reorder_grouped_files(
     return reordered
 
 
+def sort_grouped_files(
+    files: Iterable[Path],
+    parents: dict[Path, Path | None],
+    sort_mode: str,
+    email_datetimes: dict[Path, datetime | None] | None = None,
+) -> list[Path]:
+    manual_files = list(files)
+    if sort_mode == SORT_MANUAL:
+        return manual_files
+
+    manual_index = {path: index for index, path in enumerate(manual_files)}
+    file_set = set(manual_files)
+    children: dict[Path | None, list[Path]] = {}
+    for path in manual_files:
+        parent = parents.get(path)
+        children.setdefault(parent if parent in file_set else None, []).append(path)
+
+    if sort_mode == SORT_FILENAME:
+        children.get(None, []).sort(
+            key=lambda path: (path.name.casefold(), manual_index[path])
+        )
+    elif sort_mode == SORT_EMAIL_DATE:
+        dates = email_datetimes or {}
+
+        def email_date_key(path: Path) -> tuple[int, float, int]:
+            value = dates.get(path)
+            if value is None:
+                return (1, 0.0, manual_index[path])
+            try:
+                timestamp = value.timestamp()
+            except (OSError, OverflowError, ValueError):
+                return (1, 0.0, manual_index[path])
+            return (0, timestamp, manual_index[path])
+
+        children.get(None, []).sort(key=email_date_key)
+
+    sorted_files: list[Path] = []
+
+    def append_branch(parent: Path | None) -> None:
+        for path in children.get(parent, []):
+            sorted_files.append(path)
+            append_branch(path)
+
+    append_branch(None)
+    return sorted_files
+
+
 class PrintAssistApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
@@ -123,7 +175,9 @@ class PrintAssistApp:
         self.root.geometry("900x560")
 
         self.files: list[Path] = []
+        self.manual_files: list[Path] = []
         self.file_parents: dict[Path, Path | None] = {}
+        self.file_datetimes: dict[Path, datetime | None] = {}
         self._tree_item_paths: dict[str, Path] = {}
         self.output_path: Path | None = None
 
@@ -131,6 +185,7 @@ class PrintAssistApp:
         self.output_var = tk.StringVar(value="No output file selected")
         self.progress_var = tk.DoubleVar(value=0)
         self.file_count_var = tk.StringVar(value="Selected files: 0")
+        self.sort_var = tk.StringVar(value=SORT_MANUAL)
         self._preview_running = False
         self._preview_queue: queue.Queue[tuple[str, object]] | None = None
         self._preview_temp_dir_obj: tempfile.TemporaryDirectory[str] | None = None
@@ -155,20 +210,35 @@ class PrintAssistApp:
         list_label = ttk.Label(frame, text="Drop files, folders, or Outlook email messages here:")
         list_label.pack(anchor="w")
 
+        sort_frame = ttk.Frame(frame)
+        sort_frame.pack(fill=tk.X, pady=(6, 0))
+        ttk.Label(sort_frame, text="Sort by:").pack(side=tk.LEFT)
+        self.sort_combo = ttk.Combobox(
+            sort_frame,
+            textvariable=self.sort_var,
+            values=(SORT_MANUAL, SORT_FILENAME, SORT_EMAIL_DATE),
+            state="readonly",
+            width=28,
+        )
+        self.sort_combo.pack(side=tk.LEFT, padx=(6, 0))
+        self.sort_combo.bind("<<ComboboxSelected>>", self._on_sort_changed)
+
         list_frame = ttk.Frame(frame)
         list_frame.pack(fill=tk.BOTH, expand=True, pady=(6, 10))
 
         self.file_tree = ttk.Treeview(
             list_frame,
-            columns=("folder",),
+            columns=("date_time", "folder"),
             selectmode="extended",
             show=("tree", "headings"),
             height=18,
         )
         self.file_tree.heading("#0", text="File")
+        self.file_tree.heading("date_time", text="Email date & time")
         self.file_tree.heading("folder", text="Folder")
-        self.file_tree.column("#0", width=360, minwidth=180, stretch=True)
-        self.file_tree.column("folder", width=460, minwidth=180, stretch=True)
+        self.file_tree.column("#0", width=300, minwidth=180, stretch=True)
+        self.file_tree.column("date_time", width=145, minwidth=130, stretch=False)
+        self.file_tree.column("folder", width=370, minwidth=180, stretch=True)
         self.file_tree.grid(row=0, column=0, sticky="nsew")
         y_scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.file_tree.yview)
         y_scrollbar.grid(row=0, column=1, sticky="ns")
@@ -390,7 +460,7 @@ class PrintAssistApp:
         paths: list[Path],
         max_nested_depth: int = 5,
     ) -> tuple[list[Path], list[Path], list[str]]:
-        expanded, _, unsupported, warnings = PrintAssistApp._expand_outlook_message_entries(
+        expanded, _, _, unsupported, warnings = PrintAssistApp._expand_outlook_message_entries(
             self,
             paths,
             max_nested_depth=max_nested_depth,
@@ -401,9 +471,16 @@ class PrintAssistApp:
         self,
         paths: list[Path],
         max_nested_depth: int = 5,
-    ) -> tuple[list[Path], dict[Path, Path | None], list[Path], list[str]]:
+    ) -> tuple[
+        list[Path],
+        dict[Path, Path | None],
+        dict[Path, datetime | None],
+        list[Path],
+        list[str],
+    ]:
         expanded: list[Path] = []
         parents: dict[Path, Path | None] = {}
+        message_datetimes: dict[Path, datetime | None] = {}
         unsupported: list[Path] = []
         warnings: list[str] = []
         visited_messages: set[Path] = set()
@@ -424,9 +501,14 @@ class PrintAssistApp:
             visited_messages.add(message_key)
 
             try:
-                attachments, attachment_warnings = extract_msg_attachments(path, attachment_dir)
+                attachments, attachment_warnings, message_datetime = extract_msg_details(
+                    path,
+                    attachment_dir,
+                )
+                message_datetimes[path] = message_datetime
                 warnings.extend(f"{path.name}: {warning}" for warning in attachment_warnings)
             except Exception as exc:
+                message_datetimes[path] = None
                 warnings.append(f"Could not include attachments from '{path.name}': {exc}")
                 return
 
@@ -439,6 +521,7 @@ class PrintAssistApp:
                     if depth >= max_nested_depth:
                         expanded.append(attachment_path)
                         parents[attachment_path] = path
+                        message_datetimes[attachment_path] = None
                         warnings.append(
                             f"Nested attachment limit reached for '{attachment_path.name}'; "
                             "its own attachments were not expanded."
@@ -452,7 +535,7 @@ class PrintAssistApp:
         for path in paths:
             add_path(path, 0)
 
-        return expanded, parents, unsupported, warnings
+        return expanded, parents, message_datetimes, unsupported, warnings
 
     def _append_paths(
         self,
@@ -463,20 +546,21 @@ class PrintAssistApp:
         if precomputed_unsupported:
             unsupported = list(unsupported) + precomputed_unsupported
 
-        new_supported = [path for path in supported if path not in self.files]
-        expanded, expanded_parents, message_unsupported, message_warnings = (
+        new_supported = [path for path in supported if path not in self.manual_files]
+        expanded, expanded_parents, expanded_datetimes, message_unsupported, message_warnings = (
             self._expand_outlook_message_entries(new_supported)
         )
         unsupported = list(unsupported) + message_unsupported
 
         added = 0
         for p in expanded:
-            if p not in self.files:
-                self.files.append(p)
+            if p not in self.manual_files:
+                self.manual_files.append(p)
                 self.file_parents[p] = expanded_parents.get(p)
+                self.file_datetimes[p] = expanded_datetimes.get(p)
                 added += 1
         if added:
-            self._refresh_file_tree()
+            self._apply_sort()
 
         if added and self.output_path is None:
             self.output_path = default_output_path(new_supported or self.files)
@@ -517,15 +601,16 @@ class PrintAssistApp:
         changed = True
         while changed:
             changed = False
-            for path in self.files:
+            for path in self.manual_files:
                 if path not in removed and self.file_parents.get(path) in removed:
                     removed.add(path)
                     changed = True
 
-        self.files = [path for path in self.files if path not in removed]
+        self.manual_files = [path for path in self.manual_files if path not in removed]
         for path in removed:
             self.file_parents.pop(path, None)
-        self._refresh_file_tree()
+            self.file_datetimes.pop(path, None)
+        self._apply_sort()
         self._update_file_count()
         self.status_var.set(f"{len(removed)} file(s) removed.")
 
@@ -534,6 +619,26 @@ class PrintAssistApp:
 
     def move_down(self) -> None:
         self._move_selected_groups(1)
+
+    def _on_sort_changed(self, event: tk.Event | None = None) -> None:
+        _ = event
+        self._apply_sort()
+        self.status_var.set(f"Sorted by {self.sort_var.get().lower()}.")
+
+    def _apply_sort(self, selected_paths: Iterable[Path] | None = None) -> None:
+        self.files = sort_grouped_files(
+            self.manual_files,
+            self.file_parents,
+            self.sort_var.get(),
+            self.file_datetimes,
+        )
+        self._refresh_file_tree(selected_paths)
+
+    def _format_file_datetime(self, path: Path) -> str:
+        value = self.file_datetimes.get(path)
+        if value is None:
+            return ""
+        return value.strftime("%d/%m/%Y %H:%M")
 
     def _selected_tree_paths(self) -> list[Path]:
         return [
@@ -571,7 +676,7 @@ class PrintAssistApp:
                 tk.END,
                 iid=item_id,
                 text=path.name,
-                values=(str(path.parent),),
+                values=(self._format_file_datetime(path), str(path.parent)),
                 open=path in open_paths or (has_children and path not in previously_rendered_paths),
             )
             path_items[path] = item_id
@@ -589,16 +694,22 @@ class PrintAssistApp:
             self.status_var.set("No files selected.")
             return
 
-        reordered = reorder_grouped_files(self.files, self.file_parents, selected, direction)
-        if reordered == self.files:
+        if self.sort_var.get() != SORT_MANUAL:
+            self.sort_var.set(SORT_MANUAL)
+
+        reordered = reorder_grouped_files(self.manual_files, self.file_parents, selected, direction)
+        if reordered == self.manual_files:
+            self._apply_sort(selected)
             return
 
-        self.files = reordered
-        self._refresh_file_tree(selected)
+        self.manual_files = reordered
+        self._apply_sort(selected)
 
     def clear_files(self) -> None:
         self.files.clear()
+        self.manual_files.clear()
         self.file_parents.clear()
+        self.file_datetimes.clear()
         self._refresh_file_tree(())
         self.progress_var.set(0)
         self._update_file_count()
@@ -636,6 +747,7 @@ class PrintAssistApp:
             button = self.buttons.get(label)
             if button is not None:
                 button.configure(state=state)
+        self.sort_combo.configure(state="readonly" if enabled else tk.DISABLED)
 
     def _cleanup_preview_temp_dir(self) -> None:
         if self._preview_temp_dir_obj is not None:

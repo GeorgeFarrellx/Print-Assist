@@ -2,12 +2,20 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from print_assist.app import PrintAssistApp, format_file_selection_summary, reorder_grouped_files
-from print_assist.outlook_message import _save_visible_attachments
+from print_assist.app import (
+    SORT_EMAIL_DATE,
+    SORT_FILENAME,
+    PrintAssistApp,
+    format_file_selection_summary,
+    reorder_grouped_files,
+    sort_grouped_files,
+)
+from print_assist.outlook_message import _message_datetime, _save_visible_attachments
 
 
 class _PropertyAccessor:
@@ -93,8 +101,15 @@ class OutlookMessageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             saved, warnings = _save_visible_attachments(message, Path(temp_dir))
 
-            self.assertEqual(warnings, [])
-            self.assertEqual(saved[0].name, "statement.pdf")
+        self.assertEqual(warnings, [])
+        self.assertEqual(saved[0].name, "statement.pdf")
+
+    def test_message_datetime_prefers_sent_time(self) -> None:
+        sent_time = datetime(2025, 4, 3, 14, 30)
+        received_time = datetime(2025, 4, 3, 14, 31)
+        message = SimpleNamespace(SentOn=sent_time, ReceivedTime=received_time)
+
+        self.assertEqual(_message_datetime(message), sent_time)
 
     def test_msg_path_expands_email_then_printable_attachments_in_order(self) -> None:
         source_message = Path("email.msg")
@@ -106,15 +121,22 @@ class OutlookMessageTests(unittest.TestCase):
             _get_outlook_drop_temp_dir=lambda: Path("temp"),
         )
 
-        def fake_extract(path: Path, target_dir: Path) -> tuple[list[Path], list[str]]:
+        def fake_extract(
+            path: Path,
+            target_dir: Path,
+        ) -> tuple[list[Path], list[str], datetime | None]:
             _ = target_dir
             if path == source_message:
-                return [first_attachment, nested_message, unsupported_attachment], []
+                return (
+                    [first_attachment, nested_message, unsupported_attachment],
+                    [],
+                    datetime(2025, 1, 2, 9, 0),
+                )
             if path == nested_message:
-                return [nested_attachment], []
+                return [nested_attachment], [], datetime(2025, 1, 2, 8, 0)
             raise AssertionError(f"Unexpected message: {path}")
 
-        with patch("print_assist.app.extract_msg_attachments", side_effect=fake_extract):
+        with patch("print_assist.app.extract_msg_details", side_effect=fake_extract):
             expanded, unsupported, warnings = PrintAssistApp._expand_outlook_message_paths(
                 fake_app,
                 [source_message],
@@ -136,16 +158,22 @@ class OutlookMessageTests(unittest.TestCase):
             _get_outlook_drop_temp_dir=lambda: Path("temp"),
         )
 
-        def fake_extract(path: Path, target_dir: Path) -> tuple[list[Path], list[str]]:
+        source_time = datetime(2025, 1, 2, 9, 0)
+        nested_time = datetime(2025, 1, 2, 8, 0)
+
+        def fake_extract(
+            path: Path,
+            target_dir: Path,
+        ) -> tuple[list[Path], list[str], datetime | None]:
             _ = target_dir
             if path == source_message:
-                return [first_attachment, nested_message], []
+                return [first_attachment, nested_message], [], source_time
             if path == nested_message:
-                return [nested_attachment], []
+                return [nested_attachment], [], nested_time
             raise AssertionError(f"Unexpected message: {path}")
 
-        with patch("print_assist.app.extract_msg_attachments", side_effect=fake_extract):
-            expanded, parents, unsupported, warnings = (
+        with patch("print_assist.app.extract_msg_details", side_effect=fake_extract):
+            expanded, parents, message_datetimes, unsupported, warnings = (
                 PrintAssistApp._expand_outlook_message_entries(fake_app, [source_message])
             )
 
@@ -162,6 +190,13 @@ class OutlookMessageTests(unittest.TestCase):
                 nested_attachment: nested_message,
             },
         )
+        self.assertEqual(
+            message_datetimes,
+            {
+                source_message: source_time,
+                nested_message: nested_time,
+            },
+        )
         self.assertEqual(unsupported, [])
         self.assertEqual(warnings, [])
 
@@ -175,6 +210,64 @@ class OutlookMessageTests(unittest.TestCase):
         reordered = reorder_grouped_files(files, parents, {email}, 1)
 
         self.assertEqual(reordered, [other, email, attachment])
+
+    def test_filename_sort_only_reorders_top_level_items(self) -> None:
+        email_z = Path("z-email.msg")
+        attachment_z = Path("z-attachment.pdf")
+        attachment_a = Path("a-attachment.pdf")
+        email_a = Path("a-email.msg")
+        files = [email_z, attachment_z, attachment_a, email_a]
+        parents = {
+            email_z: None,
+            attachment_z: email_z,
+            attachment_a: email_z,
+            email_a: None,
+        }
+
+        sorted_files = sort_grouped_files(files, parents, SORT_FILENAME)
+
+        self.assertEqual(
+            sorted_files,
+            [email_a, email_z, attachment_z, attachment_a],
+        )
+
+    def test_email_date_sort_keeps_each_attachment_group_intact(self) -> None:
+        later_email = Path("later.msg")
+        first_attachment = Path("first.pdf")
+        second_attachment = Path("second.pdf")
+        earlier_email = Path("earlier.msg")
+        undated_file = Path("other.pdf")
+        files = [
+            later_email,
+            first_attachment,
+            second_attachment,
+            undated_file,
+            earlier_email,
+        ]
+        parents = {
+            later_email: None,
+            first_attachment: later_email,
+            second_attachment: later_email,
+            undated_file: None,
+            earlier_email: None,
+        }
+        dates = {
+            later_email: datetime(2025, 2, 1, 12, 0),
+            earlier_email: datetime(2025, 1, 1, 12, 0),
+        }
+
+        sorted_files = sort_grouped_files(files, parents, SORT_EMAIL_DATE, dates)
+
+        self.assertEqual(
+            sorted_files,
+            [
+                earlier_email,
+                later_email,
+                first_attachment,
+                second_attachment,
+                undated_file,
+            ],
+        )
 
 
 if __name__ == "__main__":

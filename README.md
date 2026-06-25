@@ -20,6 +20,7 @@ Print Assist is a Windows-first Python desktop app that combines mixed printable
 - Add Client Folder to import supported direct files plus supported files from direct child Attachments/Attachment/Email Attachments folders (non-recursive beyond those folders).
 - Shows selected files in a tree with vertical and horizontal scrollbars for long file lists/paths.
 - Groups each Outlook email's extracted attachments beneath that email; email groups can be collapsed or expanded.
+- Sorts the upload list by manual order, filename A–Z, or Outlook email date/time while preserving attachment groups.
 - Main controls are grouped into Import, File list/order, and Output/action rows for a clearer layout.
 - Reorder file order (Move Up / Move Down).
 - Remove selected files or clear all.

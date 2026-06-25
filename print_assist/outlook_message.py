@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 
@@ -114,7 +115,21 @@ def _save_visible_attachments(message: object, target_dir: Path) -> tuple[list[P
     return saved, warnings
 
 
-def extract_msg_attachments(source_path: Path, target_dir: Path) -> tuple[list[Path], list[str]]:
+def _message_datetime(message: object) -> datetime | None:
+    for attribute_name in ("SentOn", "ReceivedTime", "CreationTime"):
+        try:
+            value = getattr(message, attribute_name)
+        except Exception:
+            continue
+        if isinstance(value, datetime):
+            return value
+    return None
+
+
+def extract_msg_details(
+    source_path: Path,
+    target_dir: Path,
+) -> tuple[list[Path], list[str], datetime | None]:
     try:
         import pythoncom
         import win32com.client
@@ -129,7 +144,8 @@ def extract_msg_attachments(source_path: Path, target_dir: Path) -> tuple[list[P
         outlook = win32com.client.Dispatch("Outlook.Application")
         namespace = outlook.GetNamespace("MAPI")
         message = namespace.OpenSharedItem(str(source_path))
-        return _save_visible_attachments(message, target_dir)
+        attachments, warnings = _save_visible_attachments(message, target_dir)
+        return attachments, warnings, _message_datetime(message)
     except Exception as exc:
         raise RuntimeError(f"Failed to read attachments from Outlook message: {source_path.name}") from exc
     finally:
@@ -137,3 +153,8 @@ def extract_msg_attachments(source_path: Path, target_dir: Path) -> tuple[list[P
         namespace = None
         outlook = None
         pythoncom.CoUninitialize()
+
+
+def extract_msg_attachments(source_path: Path, target_dir: Path) -> tuple[list[Path], list[str]]:
+    attachments, warnings, _ = extract_msg_details(source_path, target_dir)
+    return attachments, warnings
