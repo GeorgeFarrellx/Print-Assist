@@ -45,6 +45,15 @@ pip install -r requirements.txt
 python main.py
 ```
 
+## Build the Windows executable
+
+```bash
+python -m PyInstaller --noconfirm --clean PrintAssist.spec
+```
+
+The build specification bundles the complete Print Assist icon set and embeds
+the multi-size Windows icon in `dist/PrintAssist.exe`.
+
 ## Preview and output behavior
 
 - "Preview Print Assist PDF" generates a temporary combined preview PDF using the same build pipeline as final output.

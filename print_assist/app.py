@@ -17,6 +17,7 @@ except Exception:
     DND_FILES = None
 
 from . import APP_NAME
+from .app_icon import configure_window_icon
 from .file_utils import (
     PRINTABLE_EXTENSIONS,
     ZIP_EXTENSIONS,
@@ -172,6 +173,7 @@ class PrintAssistApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title(APP_NAME)
+        configure_window_icon(self.root)
         self.root.geometry("900x560")
 
         self.files: list[Path] = []

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs><filter id="s" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="4" stdDeviation="7" flood-color="#334155" flood-opacity="0.16"></feDropShadow></filter></defs>
+  <g transform="translate(128,64)">
+    <g transform="rotate(-15 -52 4)"><rect x="-82" y="-31" width="58" height="74" rx="10" fill="#FF5B5B"></rect><rect x="-71" y="-16" width="32" height="7" rx="3.5" fill="#FFF" opacity="0.9"></rect><rect x="-71" y="-2" width="32" height="7" rx="3.5" fill="#FFF" opacity="0.55"></rect></g>
+    <g transform="rotate(15 52 4)"><rect x="24" y="-31" width="58" height="74" rx="10" fill="#22A565"></rect><rect x="35" y="-16" width="32" height="7" rx="3.5" fill="#FFF" opacity="0.9"></rect><rect x="35" y="-2" width="32" height="7" rx="3.5" fill="#FFF" opacity="0.55"></rect></g>
+    <rect x="-29" y="-37" width="58" height="76" rx="10" fill="#3B82F6"></rect><rect x="-18" y="-22" width="32" height="7" rx="3.5" fill="#FFF" opacity="0.95"></rect><rect x="-18" y="-8" width="32" height="7" rx="3.5" fill="#FFF" opacity="0.6"></rect>
+  </g>
+  <g fill="none" stroke="#A6B3CA" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M112 118 L128 130 L144 118"></path>
+    <path d="M112 130 L128 142 L144 130" opacity="0.55"></path>
+  </g>
+  <g transform="translate(128,196)" filter="url(#s)">
+    <rect x="-56" y="-46" width="112" height="92" rx="13" fill="#FFF" stroke="#E2E8F2" stroke-width="2"></rect>
+    <rect x="-37" y="-28" width="74" height="11" rx="5.5" fill="#FF5B5B"></rect>
+    <rect x="-37" y="-7" width="74" height="11" rx="5.5" fill="#3B82F6"></rect>
+    <rect x="-37" y="14" width="54" height="11" rx="5.5" fill="#22A565"></rect>
+  </g>
+</svg>
