@@ -80,6 +80,42 @@ def format_file_selection_summary(
     return f"Selected: {' + '.join(parts)}"
 
 
+def reorder_grouped_files(
+    files: Iterable[Path],
+    parents: dict[Path, Path | None],
+    selected: set[Path],
+    direction: int,
+) -> list[Path]:
+    ordered_files = list(files)
+    file_set = set(ordered_files)
+    children: dict[Path | None, list[Path]] = {}
+    for path in ordered_files:
+        parent = parents.get(path)
+        children.setdefault(parent if parent in file_set else None, []).append(path)
+
+    changed = False
+    for siblings in children.values():
+        indices = range(1, len(siblings)) if direction < 0 else range(len(siblings) - 2, -1, -1)
+        for index in indices:
+            adjacent_index = index + direction
+            if siblings[index] in selected and siblings[adjacent_index] not in selected:
+                siblings[adjacent_index], siblings[index] = siblings[index], siblings[adjacent_index]
+                changed = True
+
+    if not changed:
+        return ordered_files
+
+    reordered: list[Path] = []
+
+    def append_branch(parent: Path | None) -> None:
+        for path in children.get(parent, []):
+            reordered.append(path)
+            append_branch(path)
+
+    append_branch(None)
+    return reordered
+
+
 class PrintAssistApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
@@ -87,6 +123,8 @@ class PrintAssistApp:
         self.root.geometry("900x560")
 
         self.files: list[Path] = []
+        self.file_parents: dict[Path, Path | None] = {}
+        self._tree_item_paths: dict[str, Path] = {}
         self.output_path: Path | None = None
 
         self.status_var = tk.StringVar(value="Ready")
@@ -120,14 +158,24 @@ class PrintAssistApp:
         list_frame = ttk.Frame(frame)
         list_frame.pack(fill=tk.BOTH, expand=True, pady=(6, 10))
 
-        self.listbox = tk.Listbox(list_frame, selectmode=tk.EXTENDED, height=18, xscrollcommand=None, yscrollcommand=None)
-        self.listbox.grid(row=0, column=0, sticky="nsew")
-        y_scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.listbox.yview)
+        self.file_tree = ttk.Treeview(
+            list_frame,
+            columns=("folder",),
+            selectmode="extended",
+            show=("tree", "headings"),
+            height=18,
+        )
+        self.file_tree.heading("#0", text="File")
+        self.file_tree.heading("folder", text="Folder")
+        self.file_tree.column("#0", width=360, minwidth=180, stretch=True)
+        self.file_tree.column("folder", width=460, minwidth=180, stretch=True)
+        self.file_tree.grid(row=0, column=0, sticky="nsew")
+        y_scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.file_tree.yview)
         y_scrollbar.grid(row=0, column=1, sticky="ns")
-        x_scrollbar = ttk.Scrollbar(list_frame, orient=tk.HORIZONTAL, command=self.listbox.xview)
+        x_scrollbar = ttk.Scrollbar(list_frame, orient=tk.HORIZONTAL, command=self.file_tree.xview)
         x_scrollbar.grid(row=1, column=0, sticky="ew")
-        self.listbox.configure(yscrollcommand=y_scrollbar.set, xscrollcommand=x_scrollbar.set)
-        bind_mouse_scroll(self.listbox)
+        self.file_tree.configure(yscrollcommand=y_scrollbar.set, xscrollcommand=x_scrollbar.set)
+        bind_mouse_scroll(self.file_tree)
         list_frame.columnconfigure(0, weight=1)
         list_frame.rowconfigure(0, weight=1)
 
@@ -168,7 +216,7 @@ class PrintAssistApp:
             return False
         try:
             self.root.update_idletasks()
-            hwnd = int(self.listbox.winfo_id())
+            hwnd = int(self.file_tree.winfo_id())
             target = NativeWindowsDropTarget(
                 on_paths=self._queue_native_drop_paths,
                 materialise_virtual_files=self._materialise_outlook_virtual_attachments,
@@ -342,14 +390,28 @@ class PrintAssistApp:
         paths: list[Path],
         max_nested_depth: int = 5,
     ) -> tuple[list[Path], list[Path], list[str]]:
+        expanded, _, unsupported, warnings = PrintAssistApp._expand_outlook_message_entries(
+            self,
+            paths,
+            max_nested_depth=max_nested_depth,
+        )
+        return expanded, unsupported, warnings
+
+    def _expand_outlook_message_entries(
+        self,
+        paths: list[Path],
+        max_nested_depth: int = 5,
+    ) -> tuple[list[Path], dict[Path, Path | None], list[Path], list[str]]:
         expanded: list[Path] = []
+        parents: dict[Path, Path | None] = {}
         unsupported: list[Path] = []
         warnings: list[str] = []
         visited_messages: set[Path] = set()
         attachment_dir = self._get_outlook_drop_temp_dir() / "message_attachments"
 
-        def add_path(path: Path, depth: int) -> None:
+        def add_path(path: Path, depth: int, parent_email: Path | None = None) -> None:
             expanded.append(path)
+            parents[path] = parent_email
             if path.suffix.lower() != ".msg":
                 return
 
@@ -376,19 +438,21 @@ class PrintAssistApp:
                 if suffix == ".msg":
                     if depth >= max_nested_depth:
                         expanded.append(attachment_path)
+                        parents[attachment_path] = path
                         warnings.append(
                             f"Nested attachment limit reached for '{attachment_path.name}'; "
                             "its own attachments were not expanded."
                         )
                     else:
-                        add_path(attachment_path, depth + 1)
+                        add_path(attachment_path, depth + 1, path)
                 else:
                     expanded.append(attachment_path)
+                    parents[attachment_path] = path
 
         for path in paths:
             add_path(path, 0)
 
-        return expanded, unsupported, warnings
+        return expanded, parents, unsupported, warnings
 
     def _append_paths(
         self,
@@ -400,15 +464,19 @@ class PrintAssistApp:
             unsupported = list(unsupported) + precomputed_unsupported
 
         new_supported = [path for path in supported if path not in self.files]
-        expanded, message_unsupported, message_warnings = self._expand_outlook_message_paths(new_supported)
+        expanded, expanded_parents, message_unsupported, message_warnings = (
+            self._expand_outlook_message_entries(new_supported)
+        )
         unsupported = list(unsupported) + message_unsupported
 
         added = 0
         for p in expanded:
             if p not in self.files:
                 self.files.append(p)
-                self.listbox.insert(tk.END, str(p))
+                self.file_parents[p] = expanded_parents.get(p)
                 added += 1
+        if added:
+            self._refresh_file_tree()
 
         if added and self.output_path is None:
             self.output_path = default_output_path(new_supported or self.files)
@@ -440,37 +508,98 @@ class PrintAssistApp:
         self.file_count_var.set(format_file_selection_summary(self.files, outlook_temp_dir))
 
     def remove_selected(self) -> None:
-        indices = list(self.listbox.curselection())
-        for i in reversed(indices):
-            self.listbox.delete(i)
-            self.files.pop(i)
+        selected = set(self._selected_tree_paths())
+        if not selected:
+            self.status_var.set("No files selected.")
+            return
+
+        removed = set(selected)
+        changed = True
+        while changed:
+            changed = False
+            for path in self.files:
+                if path not in removed and self.file_parents.get(path) in removed:
+                    removed.add(path)
+                    changed = True
+
+        self.files = [path for path in self.files if path not in removed]
+        for path in removed:
+            self.file_parents.pop(path, None)
+        self._refresh_file_tree()
         self._update_file_count()
-        self.status_var.set(f"{len(indices)} file(s) removed.")
+        self.status_var.set(f"{len(removed)} file(s) removed.")
 
     def move_up(self) -> None:
-        for i in self.listbox.curselection():
-            if i == 0:
-                continue
-            self.files[i - 1], self.files[i] = self.files[i], self.files[i - 1]
-            self._refresh_listbox(select_index=i - 1)
+        self._move_selected_groups(-1)
 
     def move_down(self) -> None:
-        for i in reversed(self.listbox.curselection()):
-            if i >= len(self.files) - 1:
-                continue
-            self.files[i + 1], self.files[i] = self.files[i], self.files[i + 1]
-            self._refresh_listbox(select_index=i + 1)
+        self._move_selected_groups(1)
 
-    def _refresh_listbox(self, select_index: int | None = None) -> None:
-        self.listbox.delete(0, tk.END)
-        for p in self.files:
-            self.listbox.insert(tk.END, str(p))
-        if select_index is not None:
-            self.listbox.select_set(select_index)
+    def _selected_tree_paths(self) -> list[Path]:
+        return [
+            self._tree_item_paths[item_id]
+            for item_id in self.file_tree.selection()
+            if item_id in self._tree_item_paths
+        ]
+
+    def _refresh_file_tree(self, selected_paths: Iterable[Path] | None = None) -> None:
+        if selected_paths is None:
+            selected_paths = self._selected_tree_paths()
+        selected = set(selected_paths)
+        open_paths = {
+            path
+            for item_id, path in self._tree_item_paths.items()
+            if self.file_tree.exists(item_id) and bool(self.file_tree.item(item_id, "open"))
+        }
+        previously_rendered_paths = set(self._tree_item_paths.values())
+
+        root_items = self.file_tree.get_children()
+        if root_items:
+            self.file_tree.delete(*root_items)
+        self._tree_item_paths.clear()
+        path_items: dict[Path, str] = {}
+        selected_items: list[str] = []
+        parent_paths = {parent for parent in self.file_parents.values() if parent is not None}
+
+        for index, path in enumerate(self.files):
+            parent_path = self.file_parents.get(path)
+            parent_item = path_items.get(parent_path, "")
+            item_id = f"file_{index}"
+            has_children = path in parent_paths
+            self.file_tree.insert(
+                parent_item,
+                tk.END,
+                iid=item_id,
+                text=path.name,
+                values=(str(path.parent),),
+                open=path in open_paths or (has_children and path not in previously_rendered_paths),
+            )
+            path_items[path] = item_id
+            self._tree_item_paths[item_id] = path
+            if path in selected:
+                selected_items.append(item_id)
+
+        if selected_items:
+            self.file_tree.selection_set(selected_items)
+            self.file_tree.see(selected_items[0])
+
+    def _move_selected_groups(self, direction: int) -> None:
+        selected = set(self._selected_tree_paths())
+        if not selected:
+            self.status_var.set("No files selected.")
+            return
+
+        reordered = reorder_grouped_files(self.files, self.file_parents, selected, direction)
+        if reordered == self.files:
+            return
+
+        self.files = reordered
+        self._refresh_file_tree(selected)
 
     def clear_files(self) -> None:
         self.files.clear()
-        self.listbox.delete(0, tk.END)
+        self.file_parents.clear()
+        self._refresh_file_tree(())
         self.progress_var.set(0)
         self._update_file_count()
         self.status_var.set("File list cleared.")
@@ -622,8 +751,9 @@ class PrintAssistApp:
         self.root.after(100, self._poll_preview_queue)
 
     def rename_zip_contents(self) -> None:
-        selected_indices = list(self.listbox.curselection())
-        selected_zips = [self.files[i] for i in selected_indices if self.files[i].suffix.lower() in ZIP_EXTENSIONS]
+        selected_zips = [
+            path for path in self._selected_tree_paths() if path.suffix.lower() in ZIP_EXTENSIONS
+        ]
         zip_files = selected_zips or [p for p in self.files if p.suffix.lower() in ZIP_EXTENSIONS]
 
         if not zip_files:

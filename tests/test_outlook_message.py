@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from print_assist.app import PrintAssistApp, format_file_selection_summary
+from print_assist.app import PrintAssistApp, format_file_selection_summary, reorder_grouped_files
 from print_assist.outlook_message import _save_visible_attachments
 
 
@@ -126,6 +126,55 @@ class OutlookMessageTests(unittest.TestCase):
         )
         self.assertEqual(unsupported, [unsupported_attachment])
         self.assertEqual(warnings, [])
+
+    def test_msg_expansion_keeps_each_attachment_with_its_email(self) -> None:
+        source_message = Path("email.msg")
+        nested_message = Path("attached email.msg")
+        first_attachment = Path("first.pdf")
+        nested_attachment = Path("nested.jpg")
+        fake_app = SimpleNamespace(
+            _get_outlook_drop_temp_dir=lambda: Path("temp"),
+        )
+
+        def fake_extract(path: Path, target_dir: Path) -> tuple[list[Path], list[str]]:
+            _ = target_dir
+            if path == source_message:
+                return [first_attachment, nested_message], []
+            if path == nested_message:
+                return [nested_attachment], []
+            raise AssertionError(f"Unexpected message: {path}")
+
+        with patch("print_assist.app.extract_msg_attachments", side_effect=fake_extract):
+            expanded, parents, unsupported, warnings = (
+                PrintAssistApp._expand_outlook_message_entries(fake_app, [source_message])
+            )
+
+        self.assertEqual(
+            expanded,
+            [source_message, first_attachment, nested_message, nested_attachment],
+        )
+        self.assertEqual(
+            parents,
+            {
+                source_message: None,
+                first_attachment: source_message,
+                nested_message: source_message,
+                nested_attachment: nested_message,
+            },
+        )
+        self.assertEqual(unsupported, [])
+        self.assertEqual(warnings, [])
+
+    def test_reordering_email_moves_its_attachment_group_as_one_unit(self) -> None:
+        email = Path("email.msg")
+        attachment = Path("attachment.pdf")
+        other = Path("other.pdf")
+        files = [email, attachment, other]
+        parents = {email: None, attachment: email, other: None}
+
+        reordered = reorder_grouped_files(files, parents, {email}, 1)
+
+        self.assertEqual(reordered, [other, email, attachment])
 
 
 if __name__ == "__main__":
