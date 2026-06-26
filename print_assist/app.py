@@ -43,6 +43,7 @@ from .zip_renamer import ZipExtractionWarning, default_extracted_folder_path, re
 SORT_MANUAL = "Manual order"
 SORT_FILENAME = "File name (A–Z)"
 SORT_EMAIL_DATE = "Email date (oldest first)"
+MAIN_WINDOW_GEOMETRY = "900x760"
 
 
 def _pluralised_count(count: int, singular: str, plural: str | None = None) -> str:
@@ -174,7 +175,7 @@ class PrintAssistApp:
         self.root = root
         self.root.title(APP_NAME)
         configure_window_icon(self.root)
-        self.root.geometry("900x560")
+        self.root.geometry(MAIN_WINDOW_GEOMETRY)
 
         self.files: list[Path] = []
         self.manual_files: list[Path] = []
@@ -192,7 +193,7 @@ class PrintAssistApp:
         self._preview_queue: queue.Queue[tuple[str, object]] | None = None
         self._preview_temp_dir_obj: tempfile.TemporaryDirectory[str] | None = None
         self._preview_view: PreviewWindow | None = None
-        self._main_window_geometry = "900x560"
+        self._main_window_geometry = MAIN_WINDOW_GEOMETRY
         self._main_window_minsize = self.root.minsize()
         self._outlook_drop_temp_dir_obj: tempfile.TemporaryDirectory[str] | None = None
         self._native_windows_drop_hwnd: int | None = None
