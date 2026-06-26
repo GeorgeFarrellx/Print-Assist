@@ -17,16 +17,16 @@ jobs:
     
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pyinstaller
+        python -m venv .venv
+        .venv\Scripts\python.exe -m pip install --upgrade pip
+        .venv\Scripts\python.exe -m pip install -r requirements.txt pyinstaller
     
-    - name: Build EXE with PyInstaller spec
+    - name: Build one-folder app with PyInstaller spec
       run: |
-        python -m PyInstaller --noconfirm --clean PrintAssist.spec
+        .venv\Scripts\python.exe -m PyInstaller --noconfirm --clean PrintAssist.spec
     
-    - name: Upload EXE artifact
+    - name: Upload app folder artifact
       uses: actions/upload-artifact@v4
       with:
-        name: PrintAssist-exe
-        path: dist/PrintAssist.exe
+        name: PrintAssist-windows-folder
+        path: dist/PrintAssist

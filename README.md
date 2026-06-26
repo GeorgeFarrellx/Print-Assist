@@ -51,8 +51,11 @@ python main.py
 python -m PyInstaller --noconfirm --clean PrintAssist.spec
 ```
 
-The build specification bundles the complete Print Assist icon set and embeds
-the multi-size Windows icon in `dist/PrintAssist.exe`.
+The build specification creates a one-folder Windows app at
+`dist/PrintAssist/PrintAssist.exe`. This opens faster than the previous
+single-file bundle because Windows does not need to unpack the whole app on
+every launch. The complete Print Assist icon set is bundled and the multi-size
+Windows icon is embedded in the executable.
 
 ## Preview and output behavior
 

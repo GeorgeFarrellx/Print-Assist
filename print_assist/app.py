@@ -10,6 +10,7 @@ from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
+from typing import TYPE_CHECKING
 
 try:
     from tkinterdnd2 import DND_FILES
@@ -28,8 +29,6 @@ from .file_utils import (
 )
 from .mouse_scroll import bind_mouse_scroll
 from .outlook_message import extract_msg_details, safe_outlook_attachment_name, unique_file_path
-from .pdf_builder import build_combined_pdf
-from .preview_window import PreviewWindow
 from .windows_drop import (
     NativeWindowsDropTarget,
     WINDOWS_NATIVE_DROP_AVAILABLE,
@@ -39,6 +38,9 @@ from .windows_drop import (
     revoke_drop_target,
 )
 from .zip_renamer import ZipExtractionWarning, default_extracted_folder_path, rename_and_extract_zip_contents, unique_folder_path
+
+if TYPE_CHECKING:
+    from .preview_window import PreviewWindow
 
 SORT_MANUAL = "Manual order"
 SORT_FILENAME = "File name (A–Z)"
@@ -956,6 +958,8 @@ class PrintAssistApp:
         self.root.geometry("1000x760")
         self.root.minsize(640, 480)
         try:
+            from .preview_window import PreviewWindow
+
             self._preview_view = PreviewWindow(
                 parent=self.root,
                 preview_pdf_path=preview_pdf,
@@ -1062,6 +1066,8 @@ class PrintAssistApp:
 
         def worker() -> None:
             try:
+                from .pdf_builder import build_combined_pdf
+
                 file_manifest: list[dict[str, object]] = []
 
                 def manifest_callback(entry: dict[str, object]) -> None:
