@@ -21,9 +21,9 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller
     
-    - name: Build EXE with PyInstaller
+    - name: Build EXE with PyInstaller spec
       run: |
-        pyinstaller --onefile --windowed --hidden-import win32timezone --name PrintAssist main.py
+        python -m PyInstaller --noconfirm --clean PrintAssist.spec
     
     - name: Upload EXE artifact
       uses: actions/upload-artifact@v4
