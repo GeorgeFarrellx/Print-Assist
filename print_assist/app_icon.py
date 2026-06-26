@@ -1,32 +1,16 @@
 from __future__ import annotations
 
-import ctypes
 import sys
 import tkinter as tk
 from pathlib import Path
 
 
 ASSET_DIR = Path(__file__).resolve().parent / "assets"
-WINDOWS_APP_USER_MODEL_ID = "PrintAssist.Desktop"
 WINDOW_ICON_SIZES = (256, 128, 64, 48, 32, 24, 16)
 
 
 def icon_asset_path(filename: str) -> Path:
     return ASSET_DIR / filename
-
-
-def configure_windows_app_identity() -> bool:
-    """Give Windows a stable taskbar identity for the packaged application."""
-    if sys.platform != "win32":
-        return False
-
-    try:
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(  # type: ignore[attr-defined]
-            WINDOWS_APP_USER_MODEL_ID
-        )
-    except (AttributeError, OSError):
-        return False
-    return True
 
 
 def configure_window_icon(root: tk.Misc) -> bool:
