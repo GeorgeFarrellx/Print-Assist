@@ -87,6 +87,179 @@ def format_file_selection_summary(
     return f"Selected: {' + '.join(parts)}"
 
 
+class FileFolderPickerDialog:
+    def __init__(self, parent: tk.Misc, initial_dir: Path) -> None:
+        self.parent = parent
+        self.current_dir = self._existing_directory(initial_dir)
+        self.result: tuple[str, ...] = ()
+        self._item_paths: dict[str, Path] = {}
+
+        self.window = tk.Toplevel(parent)
+        self.window.title("Add Files")
+        self.window.geometry("720x480")
+        self.window.minsize(520, 360)
+        self.window.transient(parent)
+
+        self.path_var = tk.StringVar(master=self.window, value=str(self.current_dir))
+        self.status_var = tk.StringVar(master=self.window, value="")
+
+        self._build_ui()
+        self._populate()
+        self.window.protocol("WM_DELETE_WINDOW", self._cancel)
+        self.window.bind("<Escape>", lambda _event: self._cancel())
+        self.window.bind("<Return>", lambda _event: self._choose_selected())
+        self.window.grab_set()
+        self.tree.focus_set()
+
+    @staticmethod
+    def _existing_directory(path: Path) -> Path:
+        candidate = Path(path).expanduser()
+        if candidate.is_file():
+            candidate = candidate.parent
+        if candidate.is_dir():
+            return candidate
+        return Path.cwd()
+
+    def _build_ui(self) -> None:
+        frame = ttk.Frame(self.window, padding=12)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        path_frame = ttk.Frame(frame)
+        path_frame.pack(fill=tk.X)
+        ttk.Button(path_frame, text="Up", command=self._go_up).pack(side=tk.LEFT)
+        path_entry = ttk.Entry(path_frame, textvariable=self.path_var)
+        path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(6, 6))
+        ttk.Button(path_frame, text="Go", command=self._go_to_path).pack(side=tk.LEFT)
+
+        tree_frame = ttk.Frame(frame)
+        tree_frame.pack(fill=tk.BOTH, expand=True, pady=(8, 8))
+        self.tree = ttk.Treeview(
+            tree_frame,
+            columns=("kind",),
+            selectmode="extended",
+            show=("tree", "headings"),
+        )
+        self.tree.heading("#0", text="Name")
+        self.tree.heading("kind", text="Type")
+        self.tree.column("#0", width=520, minwidth=220, stretch=True)
+        self.tree.column("kind", width=110, minwidth=80, stretch=False)
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        y_scrollbar = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.tree.yview)
+        y_scrollbar.grid(row=0, column=1, sticky="ns")
+        self.tree.configure(yscrollcommand=y_scrollbar.set)
+        self.tree.bind("<Double-1>", self._on_double_click)
+        bind_mouse_scroll(self.tree)
+        tree_frame.columnconfigure(0, weight=1)
+        tree_frame.rowconfigure(0, weight=1)
+
+        bottom_frame = ttk.Frame(frame)
+        bottom_frame.pack(fill=tk.X)
+        ttk.Label(bottom_frame, textvariable=self.status_var).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(bottom_frame, text="Cancel", command=self._cancel).pack(side=tk.RIGHT)
+        ttk.Button(bottom_frame, text="Add Selected", command=self._choose_selected).pack(
+            side=tk.RIGHT,
+            padx=(0, 6),
+        )
+
+    def _populate(self) -> None:
+        self.tree.delete(*self.tree.get_children())
+        self._item_paths.clear()
+        self.path_var.set(str(self.current_dir))
+
+        try:
+            children = list(self.current_dir.iterdir())
+        except OSError as exc:
+            self.status_var.set(f"Cannot open folder: {exc}")
+            return
+
+        directories: list[Path] = []
+        files: list[Path] = []
+        for path in children:
+            try:
+                if path.is_dir():
+                    directories.append(path)
+                elif path.is_file():
+                    files.append(path)
+            except OSError:
+                continue
+        ordered = sorted(directories, key=lambda path: path.name.casefold()) + sorted(
+            files,
+            key=lambda path: path.name.casefold(),
+        )
+
+        for path in ordered:
+            kind = "Folder" if path.is_dir() else self._file_kind(path)
+            item_id = self.tree.insert("", tk.END, text=path.name, values=(kind,))
+            self._item_paths[item_id] = path
+
+        self.status_var.set(f"{len(ordered)} item(s)")
+
+    @staticmethod
+    def _file_kind(path: Path) -> str:
+        suffix = path.suffix.lower()
+        if suffix in ZIP_EXTENSIONS:
+            return "ZIP"
+        if suffix in PRINTABLE_EXTENSIONS:
+            return suffix.removeprefix(".").upper()
+        return "File"
+
+    def _go_up(self) -> None:
+        parent = self.current_dir.parent
+        if parent != self.current_dir:
+            self.current_dir = parent
+            self._populate()
+
+    def _go_to_path(self) -> None:
+        candidate = Path(self.path_var.get().strip()).expanduser()
+        if candidate.is_file():
+            candidate = candidate.parent
+        if not candidate.is_dir():
+            self.status_var.set("Folder not found.")
+            return
+        self.current_dir = candidate
+        self._populate()
+
+    def _on_double_click(self, event: tk.Event) -> None:
+        item_id = self.tree.identify_row(event.y)
+        path = self._item_paths.get(item_id)
+        if path is None:
+            return
+        if path.is_dir():
+            self.current_dir = path
+            self._populate()
+            return
+        self.tree.selection_set(item_id)
+        self._choose_selected()
+
+    def _choose_selected(self) -> None:
+        selected = [
+            self._item_paths[item_id]
+            for item_id in self.tree.selection()
+            if item_id in self._item_paths
+        ]
+        if not selected:
+            self.status_var.set("Select files or folders to add.")
+            return
+        self.result = tuple(str(path) for path in selected)
+        self._close()
+
+    def _cancel(self) -> None:
+        self.result = ()
+        self._close()
+
+    def _close(self) -> None:
+        try:
+            if self.window.grab_current() == self.window:
+                self.window.grab_release()
+        except tk.TclError:
+            pass
+        self.window.destroy()
+
+    def show(self) -> tuple[str, ...]:
+        self.parent.wait_window(self.window)
+        return self.result
+
+
 def reorder_grouped_files(
     files: Iterable[Path],
     parents: dict[Path, Path | None],
@@ -271,19 +444,12 @@ class PrintAssistApp:
             [("Preview Print Assist PDF", self.create_preview), ("Rename + Extract ZIP", self.rename_zip_contents)],
         ]
 
-        self.buttons: dict[str, ttk.Widget] = {}
+        self.buttons: dict[str, ttk.Button] = {}
         for row_idx, group in enumerate(button_groups):
             row_frame = ttk.Frame(controls)
             row_frame.pack(fill=tk.X, pady=2)
             for col_idx, (label, command) in enumerate(group):
-                if label == "Add Files":
-                    button = ttk.Menubutton(row_frame, text=label)
-                    menu = tk.Menu(button, tearoff=False)
-                    menu.add_command(label="Individual Files...", command=command)
-                    menu.add_command(label="Folder...", command=self.add_folder)
-                    button.configure(menu=menu)
-                else:
-                    button = ttk.Button(row_frame, text=label, command=command)
+                button = ttk.Button(row_frame, text=label, command=command)
                 button.grid(row=0, column=col_idx, padx=4, pady=2, sticky="w")
                 self.buttons[label] = button
 
@@ -430,9 +596,20 @@ class PrintAssistApp:
         self._handle_dropped_paths(raw)
 
     def add_files(self) -> None:
-        types = [("PDF", "*.pdf"), ("Images", "*.jpg *.jpeg *.png *.bmp *.tif *.tiff"), ("Word documents", "*.doc *.docx"), ("Excel workbooks", "*.xls *.xlsx *.xlsm *.xlsb"), ("Outlook messages", "*.msg"), ("ZIP archives", "*.zip"), ("All files", "*.*")]
-        selected = filedialog.askopenfilenames(title="Select files", filetypes=types)
-        self._append_paths(selected)
+        selected = self._select_files_or_folders()
+        if selected:
+            self._handle_dropped_paths(selected)
+
+    def _select_files_or_folders(self) -> tuple[str, ...]:
+        dialog = FileFolderPickerDialog(self.root, self._default_picker_directory())
+        return dialog.show()
+
+    def _default_picker_directory(self) -> Path:
+        if self.files:
+            return self.files[-1].parent
+        if self.output_path is not None:
+            return self.output_path.parent
+        return Path.cwd()
 
     def add_folder(self) -> None:
         selected_folder = filedialog.askdirectory(title="Select folder")
