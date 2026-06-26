@@ -260,23 +260,30 @@ class PrintAssistApp:
 
         drag_drop_enabled = self._wire_drag_drop()
         if not drag_drop_enabled:
-            self.status_var.set("Use Add Files, Add Folder, or Add Client Folder")
+            self.status_var.set("Use Add Files to add files or folders")
 
         controls = ttk.Frame(frame)
         controls.pack(fill=tk.X, pady=(0, 8))
 
         button_groups = [
-            [("Add Files", self.add_files), ("Add Folder", self.add_folder), ("Add Client Folder", self.add_client_folder)],
+            [("Add Files", self.add_files)],
             [("Remove Selected", self.remove_selected), ("Move Up", self.move_up), ("Move Down", self.move_down), ("Clear", self.clear_files)],
-            [("Choose Output", self.choose_output), ("Preview Print Assist PDF", self.create_preview), ("Rename + Extract ZIP", self.rename_zip_contents), ("Open Output Folder", self.open_output_folder)],
+            [("Preview Print Assist PDF", self.create_preview), ("Rename + Extract ZIP", self.rename_zip_contents)],
         ]
 
-        self.buttons: dict[str, ttk.Button] = {}
+        self.buttons: dict[str, ttk.Widget] = {}
         for row_idx, group in enumerate(button_groups):
             row_frame = ttk.Frame(controls)
             row_frame.pack(fill=tk.X, pady=2)
             for col_idx, (label, command) in enumerate(group):
-                button = ttk.Button(row_frame, text=label, command=command)
+                if label == "Add Files":
+                    button = ttk.Menubutton(row_frame, text=label)
+                    menu = tk.Menu(button, tearoff=False)
+                    menu.add_command(label="Individual Files...", command=command)
+                    menu.add_command(label="Folder...", command=self.add_folder)
+                    button.configure(menu=menu)
+                else:
+                    button = ttk.Button(row_frame, text=label, command=command)
                 button.grid(row=0, column=col_idx, padx=4, pady=2, sticky="w")
                 self.buttons[label] = button
 
@@ -741,13 +748,10 @@ class PrintAssistApp:
     def _set_preview_controls_enabled(self, enabled: bool) -> None:
         labels = [
             "Add Files",
-            "Add Folder",
-            "Add Client Folder",
             "Remove Selected",
             "Move Up",
             "Move Down",
             "Clear",
-            "Choose Output",
             "Preview Print Assist PDF",
             "Rename + Extract ZIP",
         ]
