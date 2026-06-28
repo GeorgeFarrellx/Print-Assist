@@ -6,6 +6,19 @@ from pathlib import Path
 project_root = Path(SPECPATH).resolve()
 asset_dir = project_root / "print_assist" / "assets"
 
+excluded_optional_modules = [
+    "IPython",
+    "matplotlib",
+    "numba",
+    "numpy",
+    "openpyxl",
+    "pandas",
+    "pyarrow",
+    "pytest",
+    "scipy",
+    "setuptools",
+]
+
 a = Analysis(
     [str(project_root / "main.py")],
     pathex=[str(project_root)],
@@ -15,7 +28,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=excluded_optional_modules,
     noarchive=False,
     optimize=0,
 )
@@ -24,16 +37,12 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
     name="PrintAssist",
     icon=str(asset_dir / "print-assist.ico"),
     debug=False,
     bootloader_ignore_signals=False,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
+    exclude_binaries=True,
     runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,
@@ -41,4 +50,14 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name="PrintAssist",
 )
