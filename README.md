@@ -73,9 +73,10 @@ Windows icon is embedded in the executable.
 - Output defaults to: `Print Assist - YYYYMMDD_HHMMSS.pdf`
 - If all selected files come from one folder, that folder is used as default save location.
 - PDF pages are fitted onto A4 (portrait/landscape chosen automatically), centered, no cropping.
-- Images are placed one per A4 page (portrait/landscape chosen automatically), centered, no cropping.
+- Images are placed one per portrait A4 page; landscape images are rotated to fit, centered, no cropping.
 - Word/Excel/MSG files are converted to temporary PDFs first, then added to the combined output PDF.
 - `.msg` conversion uses an unattended Outlook-to-Word export styled to closely match Outlook's Memo Style, so large email batches can be previewed without a Microsoft Print to PDF save dialog for every message.
+- Landscape pages produced while converting `.msg` emails are rotated onto portrait pages so email output remains portrait.
 - Adding or dropping a `.msg` automatically places the email first, followed by its visible printable attachments in Outlook order.
 - Nested attached `.msg` emails are expanded up to five levels. Hidden inline/signature images and unsupported attachments are skipped.
 - Excel output may span multiple pages based on workbook print areas and page setup.
