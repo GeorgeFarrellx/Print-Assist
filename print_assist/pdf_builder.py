@@ -35,35 +35,56 @@ def _choose_a4_orientation(width: float, height: float) -> tuple[float, float]:
     return A4_LANDSCAPE if width > height else A4_PORTRAIT
 
 
+def _portrait_content_transform(width: float, height: float) -> tuple[float, float, int]:
+    if width > height:
+        return height, width, 90
+    return width, height, 0
+
+
 def _add_pdf_pages(
     output_doc: fitz.Document,
     source_path: Path,
     preserve_page_size: bool = False,
+    force_portrait: bool = False,
 ) -> None:
     with fitz.open(source_path) as src_doc:
         for src_page in src_doc:
             src_rect = src_page.rect
+            draw_w, draw_h, rotation = (
+                _portrait_content_transform(src_rect.width, src_rect.height)
+                if force_portrait
+                else (src_rect.width, src_rect.height, 0)
+            )
             if preserve_page_size:
-                page_w, page_h = src_rect.width, src_rect.height
+                page_w, page_h = (
+                    (draw_w, draw_h)
+                    if force_portrait
+                    else (src_rect.width, src_rect.height)
+                )
             else:
-                page_w, page_h = _choose_a4_orientation(src_rect.width, src_rect.height)
+                page_w, page_h = (
+                    A4_PORTRAIT
+                    if force_portrait
+                    else _choose_a4_orientation(draw_w, draw_h)
+                )
             out_page = output_doc.new_page(width=page_w, height=page_h)
             target = (
                 out_page.rect
                 if preserve_page_size
-                else _fit_rect(src_rect.width, src_rect.height, page_w, page_h, MARGIN)
+                else _fit_rect(draw_w, draw_h, page_w, page_h, MARGIN)
             )
-            out_page.show_pdf_page(target, src_doc, src_page.number)
+            out_page.show_pdf_page(target, src_doc, src_page.number, rotate=rotation)
 
 
 def _add_image_page(output_doc: fitz.Document, image_path: Path) -> None:
     with Image.open(image_path) as img:
         width, height = img.size
 
-    page_w, page_h = _choose_a4_orientation(width, height)
+    draw_w, draw_h, rotation = _portrait_content_transform(width, height)
+    page_w, page_h = A4_PORTRAIT
     out_page = output_doc.new_page(width=page_w, height=page_h)
-    target = _fit_rect(width, height, page_w, page_h, MARGIN)
-    out_page.insert_image(target, filename=str(image_path), keep_proportion=True)
+    target = _fit_rect(draw_w, draw_h, page_w, page_h, MARGIN)
+    out_page.insert_image(target, filename=str(image_path), keep_proportion=True, rotate=rotation)
 
 
 def build_combined_pdf(
@@ -94,6 +115,7 @@ def build_combined_pdf(
                                 output_doc,
                                 converted_pdf,
                                 preserve_page_size=suffix in MSG_EXTENSIONS,
+                                force_portrait=suffix in MSG_EXTENSIONS,
                             )
                         else:
                             raise ValueError(f"Unsupported file extension: {file_path.suffix}")
