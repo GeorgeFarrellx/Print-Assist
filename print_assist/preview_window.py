@@ -14,6 +14,7 @@ from .mouse_scroll import bind_mouse_scroll
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
 EDIT_MARGIN = 24
+CANVAS_PADDING = 24
 MIN_CROP_SCREEN_PIXELS = 12
 
 
@@ -148,6 +149,11 @@ class PreviewWindow:
         self.page_index = 0
         self.saved_final = False
         self._photo: ImageTk.PhotoImage | None = None
+        self._canvas_image_id: int | None = None
+        self._canvas_shadow_id: int | None = None
+        self._canvas_border_id: int | None = None
+        self._rendered_page_size: tuple[int, int] = (0, 0)
+        self._page_offset: tuple[float, float] = (0, 0)
         self._edit_mode: str | None = None
         self._selection_start: tuple[float, float] | None = None
         self._selection_item: int | None = None
@@ -178,7 +184,7 @@ class PreviewWindow:
         self.canvas_frame = ttk.Frame(self.preview_view)
         self.canvas_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
 
-        self.canvas = tk.Canvas(self.canvas_frame, background="#202020", highlightthickness=0)
+        self.canvas = tk.Canvas(self.canvas_frame, background="#eeeeee", highlightthickness=0)
         self.v_scroll = ttk.Scrollbar(self.canvas_frame, orient=tk.VERTICAL, command=self.canvas.yview)
         self.h_scroll = ttk.Scrollbar(self.canvas_frame, orient=tk.HORIZONTAL, command=self.canvas.xview)
         self.canvas.configure(yscrollcommand=self.v_scroll.set, xscrollcommand=self.h_scroll.set)
@@ -189,6 +195,7 @@ class PreviewWindow:
         self.canvas_frame.rowconfigure(0, weight=1)
         self.canvas_frame.columnconfigure(0, weight=1)
         bind_mouse_scroll(self.canvas)
+        self.canvas.bind("<Configure>", self._position_rendered_page)
         self.canvas.bind("<ButtonPress-1>", self._on_canvas_press)
         self.canvas.bind("<B1-Motion>", self._on_canvas_drag)
         self.canvas.bind("<ButtonRelease-1>", self._on_canvas_release)
@@ -196,14 +203,31 @@ class PreviewWindow:
         buttons = ttk.Frame(self.preview_view, padding=(8, 0, 8, 8))
         buttons.pack(fill=tk.X)
 
+        view_buttons = ttk.Frame(buttons)
+        view_buttons.pack(fill=tk.X)
         edit_buttons = ttk.Frame(buttons)
         edit_buttons.pack(fill=tk.X)
         output_buttons = ttk.Frame(buttons)
         output_buttons.pack(fill=tk.X)
 
-        self.prev_btn = ttk.Button(edit_buttons, text="Previous Page", command=self.prev_page)
-        self.next_btn = ttk.Button(edit_buttons, text="Next Page", command=self.next_page)
+        self.prev_btn = ttk.Button(view_buttons, text="Previous Page", command=self.prev_page)
+        self.next_btn = ttk.Button(view_buttons, text="Next Page", command=self.next_page)
         self.crop_image_btn = ttk.Button(edit_buttons, text="Crop Image", command=self.start_image_crop)
+        self.rotate_left_btn = ttk.Button(
+            view_buttons,
+            text="Rotate Left",
+            command=self.rotate_left,
+        )
+        self.rotate_180_btn = ttk.Button(
+            view_buttons,
+            text="Rotate 180",
+            command=self.rotate_180,
+        )
+        self.rotate_right_btn = ttk.Button(
+            view_buttons,
+            text="Rotate Right",
+            command=self.rotate_right,
+        )
         self.trim_email_btn = ttk.Button(
             edit_buttons,
             text="Trim Email Below Line",
@@ -216,14 +240,17 @@ class PreviewWindow:
         )
         self.undo_btn = ttk.Button(edit_buttons, text="Undo Edit", command=self.undo_edit)
         self.reset_btn = ttk.Button(edit_buttons, text="Reset Edits", command=self.reset_edits)
-        ttk.Button(edit_buttons, text="Zoom Out", command=self.zoom_out).pack(
+        ttk.Button(view_buttons, text="Zoom Out", command=self.zoom_out).pack(
             side=tk.LEFT, padx=4, pady=4
         )
-        ttk.Button(edit_buttons, text="Zoom In", command=self.zoom_in).pack(
+        ttk.Button(view_buttons, text="Zoom In", command=self.zoom_in).pack(
             side=tk.LEFT, padx=4, pady=4
         )
         self.prev_btn.pack(side=tk.LEFT, padx=4, pady=4)
         self.next_btn.pack(side=tk.LEFT, padx=4, pady=4)
+        self.rotate_left_btn.pack(side=tk.LEFT, padx=4, pady=4)
+        self.rotate_180_btn.pack(side=tk.LEFT, padx=4, pady=4)
+        self.rotate_right_btn.pack(side=tk.LEFT, padx=4, pady=4)
         self.delete_page_btn.pack(side=tk.LEFT, padx=4, pady=4)
         self.trim_email_btn.pack(side=tk.LEFT, padx=4, pady=4)
         self.crop_image_btn.pack(side=tk.LEFT, padx=4, pady=4)
@@ -246,8 +273,24 @@ class PreviewWindow:
         self._photo = ImageTk.PhotoImage(image)
 
         self.canvas.delete("all")
-        self.canvas.create_image(0, 0, anchor="nw", image=self._photo)
-        self.canvas.config(scrollregion=(0, 0, pix.width, pix.height))
+        self._rendered_page_size = (pix.width, pix.height)
+        self._canvas_shadow_id = self.canvas.create_rectangle(
+            0,
+            0,
+            1,
+            1,
+            fill="#d4d4d4",
+            outline="",
+        )
+        self._canvas_image_id = self.canvas.create_image(0, 0, anchor="nw", image=self._photo)
+        self._canvas_border_id = self.canvas.create_rectangle(
+            0,
+            0,
+            1,
+            1,
+            outline="#b8b8b8",
+        )
+        self._position_rendered_page()
 
         total = len(self.doc)
         page_number = self.page_index + 1
@@ -257,6 +300,40 @@ class PreviewWindow:
         self.prev_btn.configure(state=tk.NORMAL if self.page_index > 0 else tk.DISABLED)
         self.next_btn.configure(state=tk.NORMAL if self.page_index < total - 1 else tk.DISABLED)
         self._update_edit_controls()
+
+    def _position_rendered_page(self, event: tk.Event | None = None) -> None:
+        _ = event
+        if self._canvas_image_id is None:
+            return
+
+        page_width, page_height = self._rendered_page_size
+        canvas_width = max(self.canvas.winfo_width(), 1)
+        canvas_height = max(self.canvas.winfo_height(), 1)
+        x = max(CANVAS_PADDING, (canvas_width - page_width) / 2)
+        y = max(CANVAS_PADDING, (canvas_height - page_height) / 2)
+        self._page_offset = (x, y)
+
+        if self._canvas_shadow_id is not None:
+            self.canvas.coords(
+                self._canvas_shadow_id,
+                x + 3,
+                y + 3,
+                x + page_width + 3,
+                y + page_height + 3,
+            )
+        self.canvas.coords(self._canvas_image_id, x, y)
+        if self._canvas_border_id is not None:
+            self.canvas.coords(
+                self._canvas_border_id,
+                x,
+                y,
+                x + page_width,
+                y + page_height,
+            )
+
+        scroll_width = max(canvas_width, x + page_width + CANVAS_PADDING)
+        scroll_height = max(canvas_height, y + page_height + CANVAS_PADDING)
+        self.canvas.config(scrollregion=(0, 0, scroll_width, scroll_height))
 
     def _get_manifest_entry_for_page(
         self,
@@ -298,6 +375,10 @@ class PreviewWindow:
         self.delete_page_btn.configure(
             state=tk.NORMAL if len(self.doc) > 1 else tk.DISABLED
         )
+        rotate_state = tk.NORMAL if len(self.doc) > 0 else tk.DISABLED
+        self.rotate_left_btn.configure(state=rotate_state)
+        self.rotate_180_btn.configure(state=rotate_state)
+        self.rotate_right_btn.configure(state=rotate_state)
         self.undo_btn.configure(state=tk.NORMAL if self._undo_stack else tk.DISABLED)
         has_edits = bool(self._undo_stack) or self.file_manifest != self._original_manifest
         self.reset_btn.configure(state=tk.NORMAL if has_edits else tk.DISABLED)
@@ -331,32 +412,40 @@ class PreviewWindow:
         page = self.doc[self.page_index]
         max_x = page.rect.width * self.zoom
         max_y = page.rect.height * self.zoom
-        x = min(max(self.canvas.canvasx(event.x), 0), max_x)
-        y = min(max(self.canvas.canvasy(event.y), 0), max_y)
+        offset_x, offset_y = self._page_offset
+        x = min(max(self.canvas.canvasx(event.x) - offset_x, 0), max_x)
+        y = min(max(self.canvas.canvasy(event.y) - offset_y, 0), max_y)
         return x, y
+
+    def _page_to_canvas_point(self, x: float, y: float) -> tuple[float, float]:
+        offset_x, offset_y = self._page_offset
+        return x + offset_x, y + offset_y
 
     def _on_canvas_press(self, event: tk.Event) -> None:
         if self._edit_mode is None:
             return
         x, y = self._canvas_point(event)
         self._selection_start = (x, y)
+        canvas_x, canvas_y = self._page_to_canvas_point(x, y)
         if self._edit_mode == "crop_image":
             self._selection_item = self.canvas.create_rectangle(
-                x,
-                y,
-                x,
-                y,
+                canvas_x,
+                canvas_y,
+                canvas_x,
+                canvas_y,
                 outline="#ffcc00",
                 width=3,
                 dash=(8, 4),
             )
         else:
             page_width = self.doc[self.page_index].rect.width * self.zoom
+            canvas_x0, canvas_y = self._page_to_canvas_point(0, y)
+            canvas_x1, _ = self._page_to_canvas_point(page_width, y)
             self._selection_item = self.canvas.create_line(
-                0,
-                y,
-                page_width,
-                y,
+                canvas_x0,
+                canvas_y,
+                canvas_x1,
+                canvas_y,
                 fill="#ff4444",
                 width=3,
                 dash=(8, 4),
@@ -368,10 +457,20 @@ class PreviewWindow:
         x, y = self._canvas_point(event)
         start_x, start_y = self._selection_start
         if self._edit_mode == "crop_image":
-            self.canvas.coords(self._selection_item, start_x, start_y, x, y)
+            canvas_start_x, canvas_start_y = self._page_to_canvas_point(start_x, start_y)
+            canvas_x, canvas_y = self._page_to_canvas_point(x, y)
+            self.canvas.coords(
+                self._selection_item,
+                canvas_start_x,
+                canvas_start_y,
+                canvas_x,
+                canvas_y,
+            )
         elif self._edit_mode == "trim_email":
             page_width = self.doc[self.page_index].rect.width * self.zoom
-            self.canvas.coords(self._selection_item, 0, y, page_width, y)
+            canvas_x0, canvas_y = self._page_to_canvas_point(0, y)
+            canvas_x1, _ = self._page_to_canvas_point(page_width, y)
+            self.canvas.coords(self._selection_item, canvas_x0, canvas_y, canvas_x1, canvas_y)
 
     def _on_canvas_release(self, event: tk.Event) -> None:
         if self._selection_start is None or self._edit_mode is None:
@@ -531,6 +630,53 @@ class PreviewWindow:
             source.close()
         self.on_status_change("Email thread trimmed in preview")
 
+    def rotate_left(self) -> None:
+        self._rotate_current_page(270, "Page rotated left in preview")
+
+    def rotate_180(self) -> None:
+        self._rotate_current_page(180, "Page rotated 180 degrees in preview")
+
+    def rotate_right(self) -> None:
+        self._rotate_current_page(90, "Page rotated right in preview")
+
+    def _rotate_current_page(self, degrees: int, status_message: str) -> None:
+        try:
+            self._apply_page_rotation(degrees)
+        except Exception as exc:
+            messagebox.showerror(
+                "Print Assist",
+                f"Could not rotate this preview page:\n{exc}",
+                parent=self.parent,
+            )
+            return
+        self.on_status_change(status_message)
+
+    def _apply_page_rotation(self, degrees: int) -> None:
+        degrees = degrees % 360
+        if degrees == 0:
+            return
+
+        self._push_undo_state()
+        source = fitz.open(stream=self._undo_stack[-1][0], filetype="pdf")
+        edited = fitz.open()
+        try:
+            self._insert_page_range(edited, source, 0, self.page_index - 1)
+            page_rect = source[self.page_index].rect
+            output_page = edited.new_page(width=page_rect.width, height=page_rect.height)
+            output_page.show_pdf_page(output_page.rect, source, self.page_index, rotate=degrees)
+            self._insert_page_range(edited, source, self.page_index + 1, len(source) - 1)
+            self._replace_preview_document(
+                edited,
+                copy.deepcopy(self.file_manifest),
+                self.page_index,
+            )
+        except Exception:
+            edited.close()
+            self._undo_stack.pop()
+            raise
+        finally:
+            source.close()
+
     def delete_current_page(self) -> None:
         if len(self.doc) <= 1:
             messagebox.showinfo(
@@ -598,7 +744,7 @@ class PreviewWindow:
             return
         reset = messagebox.askyesno(
             "Print Assist",
-            "Reset all image crops, email trims, and deleted pages?",
+            "Reset all image crops, rotations, email trims, and deleted pages?",
             parent=self.parent,
         )
         if not reset:
