@@ -14,6 +14,12 @@ from print_assist.preview_window import (
 )
 
 
+def _page_rgb_at(page: fitz.Page, x: int, y: int) -> tuple[int, int, int]:
+    pix = page.get_pixmap(alpha=False)
+    index = ((y * pix.width) + x) * pix.n
+    return tuple(pix.samples[index : index + 3])
+
+
 class PreviewEditTests(unittest.TestCase):
     def test_page_status_shows_overall_and_current_file_page_counts(self) -> None:
         manifest = [
@@ -243,6 +249,61 @@ class PreviewEditTests(unittest.TestCase):
                 self.assertIn("attachment", editor.doc[2].get_text())
                 self.assertEqual(editor.file_manifest[0]["output_end_page"], 2)
                 self.assertEqual(editor.file_manifest[1]["output_start_page"], 3)
+            finally:
+                editor.doc.close()
+
+    def test_page_rotation_turns_current_page_and_preserves_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pdf_path = Path(temp_dir) / "preview.pdf"
+            source = fitz.open()
+            source.new_page(width=100, height=100)
+            rotated_page = source.new_page(width=100, height=100)
+            rotated_page.draw_rect(
+                fitz.Rect(0, 0, 30, 30),
+                color=(1, 0, 0),
+                fill=(1, 0, 0),
+            )
+            rotated_page.draw_rect(
+                fitz.Rect(70, 70, 100, 100),
+                color=(0, 0, 1),
+                fill=(0, 0, 1),
+            )
+            source.new_page(width=100, height=100)
+            source.save(pdf_path)
+            source.close()
+
+            manifest = [
+                {
+                    "source_name": "before.pdf",
+                    "source_extension": ".pdf",
+                    "output_start_page": 1,
+                    "output_end_page": 1,
+                    "output_page_count": 1,
+                },
+                {
+                    "source_name": "photo.jpg",
+                    "source_extension": ".jpg",
+                    "output_start_page": 2,
+                    "output_end_page": 2,
+                    "output_page_count": 1,
+                },
+                {
+                    "source_name": "after.pdf",
+                    "source_extension": ".pdf",
+                    "output_start_page": 3,
+                    "output_end_page": 3,
+                    "output_page_count": 1,
+                },
+            ]
+            editor = self._editor_for_pdf(pdf_path, manifest, page_index=1)
+            try:
+                editor._apply_page_rotation(180)
+
+                self.assertEqual(editor.doc.page_count, 3)
+                self.assertEqual(editor.file_manifest, manifest)
+                self.assertEqual(len(editor._undo_stack), 1)
+                self.assertEqual(_page_rgb_at(editor.doc[1], 85, 85), (255, 0, 0))
+                self.assertEqual(_page_rgb_at(editor.doc[1], 15, 15), (0, 0, 255))
             finally:
                 editor.doc.close()
 
