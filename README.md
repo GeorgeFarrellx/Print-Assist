@@ -29,6 +29,7 @@ Print Assist is a Windows-first Python desktop app that combines mixed printable
 - Save the final combined PDF from the in-window preview.
 - Open preview or saved PDF externally.
 - Open output folder.
+- Split a PDF into smaller files by marking breaks on a page preview or typing page ranges.
 
 ## Install
 
@@ -91,6 +92,28 @@ Windows icon is embedded in the executable.
 - Word/Excel/MSG conversion requires installed Microsoft Office/Outlook on Windows.
 - External PDF printing depends on Windows/default PDF print handling behavior.
 - Printer selection, duplex, tray selection, paper selection, and other advanced print options are not implemented yet.
+
+## Split PDFs for a converter
+
+1. Select a PDF in the file list and click **Split PDF**, or click **Split PDF** and choose a file.
+2. Browse the original pages with **Previous**, **Next**, or a page number. Use **Zoom In** to read statement headings and dates.
+3. On the first page of the next statement, click **Split before this page**. Repeat for each file you want to create. Use **Remove split here** to join that file back to the preceding one.
+4. Alternatively, type the exact **Page ranges**, such as `1-5, 6-10, 11-20`, and click **Apply Ranges**. Marking splits and typing ranges update the same output list.
+5. Review the filenames, ranges, and page counts. Choose a filename prefix and destination folder, then click **Export Split PDFs**.
+6. Click **Open Export Folder** to find the separate PDFs ready for your converter.
+
+You choose every split point. The app starts with the whole PDF and does not
+detect statement dates or suggest breaks. All pages must be included exactly
+once, in their original order, so missing or overlapping ranges are caught
+before export. Page numbers refer to positions in the source PDF, not printed
+bank sheet numbers.
+
+Splitting copies the original PDF pages, preserving selectable text, page sizes,
+cropping, rotation, and annotations. It does not use the combined PDF's A4 print
+layout. Scanned PDFs can also be split manually without OCR. The source remains
+unchanged and each export creates a new `Filename prefix - split` folder; repeat
+exports get a numbered folder. Export runs in the background and failed exports
+remove their partial output. Password-protected PDFs need an unlocked copy first.
 
 ## Planned future enhancements
 

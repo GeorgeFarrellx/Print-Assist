@@ -18,7 +18,8 @@ from print_assist.pdf_builder import (
 
 def _create_pdf(path: Path, width: float, height: float) -> None:
     doc = fitz.open()
-    doc.new_page(width=width, height=height)
+    page = doc.new_page(width=width, height=height)
+    page.insert_text((20, 30), "Printable test page")
     doc.save(path)
     doc.close()
 
