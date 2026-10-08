@@ -59,6 +59,17 @@ single-file bundle because Windows does not need to unpack the whole app on
 every launch. The complete Print Assist icon set is bundled and the multi-size
 Windows icon is embedded in the executable.
 
+Rebuild after updating the app's Python files; updating the repository does not
+update an existing executable. If using the project's virtual environment, run
+`.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean PrintAssist.spec`.
+
+Run **Create Print Assist Shortcut.bat** to create or update the desktop shortcut.
+In a source checkout, the installer prefers `dist/PrintAssist/PrintAssist.exe`
+and verifies that its build matches the current app files. It leaves an existing
+shortcut unchanged if a rebuild is needed. Each build includes the shortcut
+installer and a `print-assist-build.json` record in the app folder, so downloaded
+Windows bundles also support creating a shortcut. Keep the complete folder together.
+
 ## Preview and output behavior
 
 - "Preview Print Assist PDF" generates a temporary combined preview PDF using the same build pipeline as final output.
