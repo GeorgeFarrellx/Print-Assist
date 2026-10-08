@@ -1,6 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 from pathlib import Path
+import runpy
 
 
 project_root = Path(SPECPATH).resolve()
@@ -60,4 +61,9 @@ coll = COLLECT(
     upx=False,
     upx_exclude=[],
     name="PrintAssist",
+)
+
+runpy.run_path(str(project_root / "build_support.py"))["finish_windows_build"](
+    project_root,
+    Path(DISTPATH) / "PrintAssist",
 )
