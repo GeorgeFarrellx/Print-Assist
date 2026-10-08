@@ -156,7 +156,7 @@ class FileFolderPickerDialog:
         tree_frame.rowconfigure(0, weight=1)
 
         bottom_frame = ttk.Frame(frame)
-        bottom_frame.pack(fill=tk.X)
+        bottom_frame.pack(side=tk.BOTTOM, fill=tk.X, before=tree_frame)
         ttk.Label(bottom_frame, textvariable=self.status_var).pack(side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(bottom_frame, text="Cancel", command=self._cancel).pack(side=tk.RIGHT)
         ttk.Button(bottom_frame, text="Add Selected", command=self._choose_selected).pack(
@@ -392,12 +392,14 @@ class PrintAssistApp:
 
         frame = ttk.Frame(self.main_view, padding=12)
         frame.pack(fill=tk.BOTH, expand=True)
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(2, weight=1)
 
         list_label = ttk.Label(frame, text="Drop files, folders, or Outlook email messages here:")
-        list_label.pack(anchor="w")
+        list_label.grid(row=0, column=0, sticky="w")
 
         sort_frame = ttk.Frame(frame)
-        sort_frame.pack(fill=tk.X, pady=(6, 0))
+        sort_frame.grid(row=1, column=0, sticky="ew", pady=(6, 0))
         ttk.Label(sort_frame, text="Sort by:").pack(side=tk.LEFT)
         self.sort_combo = ttk.Combobox(
             sort_frame,
@@ -410,7 +412,7 @@ class PrintAssistApp:
         self.sort_combo.bind("<<ComboboxSelected>>", self._on_sort_changed)
 
         list_frame = ttk.Frame(frame)
-        list_frame.pack(fill=tk.BOTH, expand=True, pady=(6, 10))
+        list_frame.grid(row=2, column=0, sticky="nsew", pady=(6, 10))
 
         self.file_tree = ttk.Treeview(
             list_frame,
@@ -439,7 +441,9 @@ class PrintAssistApp:
         if not drag_drop_enabled:
             self.status_var.set("Use Add Files to add files or folders")
 
-        controls = ttk.Frame(frame)
+        self.footer = ttk.Frame(frame)
+        self.footer.grid(row=3, column=0, sticky="ew")
+        controls = ttk.Frame(self.footer)
         controls.pack(fill=tk.X, pady=(0, 8))
 
         button_groups = [
@@ -457,10 +461,18 @@ class PrintAssistApp:
                 button.grid(row=0, column=col_idx, padx=4, pady=2, sticky="w")
                 self.buttons[label] = button
 
-        ttk.Label(frame, textvariable=self.file_count_var).pack(anchor="w", pady=(0, 2))
-        ttk.Label(frame, textvariable=self.output_var).pack(anchor="w", pady=(6, 2))
-        ttk.Progressbar(frame, variable=self.progress_var, maximum=100).pack(fill=tk.X, pady=2)
-        ttk.Label(frame, textvariable=self.status_var).pack(anchor="w", pady=(6, 0))
+        ttk.Label(self.footer, textvariable=self.file_count_var).pack(anchor="w", pady=(0, 2))
+        ttk.Label(self.footer, textvariable=self.output_var).pack(anchor="w", pady=(6, 2))
+        ttk.Progressbar(self.footer, variable=self.progress_var, maximum=100).pack(fill=tk.X, pady=2)
+        ttk.Label(self.footer, textvariable=self.status_var).pack(anchor="w", pady=(6, 0))
+
+        # Keep room for the fixed controls at the current Windows text scaling.
+        self.root.update_idletasks()
+        self.root.minsize(
+            max(640, controls.winfo_reqwidth() + 24),
+            max(420, title.winfo_reqheight() + list_label.winfo_reqheight()
+                + sort_frame.winfo_reqheight() + self.footer.winfo_reqheight() + 100),
+        )
 
     def _wire_drag_drop(self) -> bool:
         if self._wire_native_windows_drop_target():
