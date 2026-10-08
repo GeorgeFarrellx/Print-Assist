@@ -94,8 +94,8 @@ class ShortcutInstallerTests(unittest.TestCase):
         result = self._install()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         shortcut = self._shortcut()
-        self.assertEqual(shortcut["Target"], str(output / "PrintAssist.exe"))
-        self.assertEqual(shortcut["Directory"], str(output))
+        self.assertTrue(os.path.samefile(shortcut["Target"], output / "PrintAssist.exe"))
+        self.assertTrue(os.path.samefile(shortcut["Directory"], output))
 
     def test_source_changes_do_not_replace_the_existing_shortcut(self) -> None:
         create_build(self.root)
@@ -126,7 +126,7 @@ class ShortcutInstallerTests(unittest.TestCase):
         output = create_build(self.root)
         result = self._install(output)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(self._shortcut()["Target"], str(output / "PrintAssist.exe"))
+        self.assertTrue(os.path.samefile(self._shortcut()["Target"], output / "PrintAssist.exe"))
 
     def test_missing_executable_leaves_no_shortcut(self) -> None:
         result = self._install()
