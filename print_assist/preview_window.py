@@ -172,9 +172,11 @@ class PreviewWindow:
     def _build_ui(self) -> None:
         self.preview_view = ttk.Frame(self.frame)
         self.preview_view.pack(fill=tk.BOTH, expand=True)
+        self.preview_view.columnconfigure(0, weight=1)
+        self.preview_view.rowconfigure(1, weight=1)
 
         top = ttk.Frame(self.preview_view, padding=8)
-        top.pack(fill=tk.X)
+        top.grid(row=0, column=0, sticky="ew")
 
         self.page_var = tk.StringVar(value="")
         ttk.Label(top, textvariable=self.page_var).pack(side=tk.LEFT)
@@ -182,7 +184,7 @@ class PreviewWindow:
         ttk.Label(top, text=f"Output: {self.output_path}").pack(side=tk.RIGHT)
 
         self.canvas_frame = ttk.Frame(self.preview_view)
-        self.canvas_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+        self.canvas_frame.grid(row=1, column=0, sticky="nsew", padx=8, pady=8)
 
         self.canvas = tk.Canvas(self.canvas_frame, background="#eeeeee", highlightthickness=0)
         self.v_scroll = ttk.Scrollbar(self.canvas_frame, orient=tk.VERTICAL, command=self.canvas.yview)
@@ -200,11 +202,15 @@ class PreviewWindow:
         self.canvas.bind("<B1-Motion>", self._on_canvas_drag)
         self.canvas.bind("<ButtonRelease-1>", self._on_canvas_release)
 
-        buttons = ttk.Frame(self.preview_view, padding=(8, 0, 8, 8))
+        self.footer = ttk.Frame(self.preview_view)
+        self.footer.grid(row=2, column=0, sticky="ew")
+        buttons = ttk.Frame(self.footer, padding=(8, 0, 8, 8))
         buttons.pack(fill=tk.X)
 
         view_buttons = ttk.Frame(buttons)
         view_buttons.pack(fill=tk.X)
+        rotation_buttons = ttk.Frame(buttons)
+        rotation_buttons.pack(fill=tk.X)
         edit_buttons = ttk.Frame(buttons)
         edit_buttons.pack(fill=tk.X)
         output_buttons = ttk.Frame(buttons)
@@ -214,17 +220,17 @@ class PreviewWindow:
         self.next_btn = ttk.Button(view_buttons, text="Next Page", command=self.next_page)
         self.crop_image_btn = ttk.Button(edit_buttons, text="Crop Image", command=self.start_image_crop)
         self.rotate_left_btn = ttk.Button(
-            view_buttons,
+            rotation_buttons,
             text="Rotate Left",
             command=self.rotate_left,
         )
         self.rotate_180_btn = ttk.Button(
-            view_buttons,
+            rotation_buttons,
             text="Rotate 180",
             command=self.rotate_180,
         )
         self.rotate_right_btn = ttk.Button(
-            view_buttons,
+            rotation_buttons,
             text="Rotate Right",
             command=self.rotate_right,
         )
@@ -234,7 +240,7 @@ class PreviewWindow:
             command=self.start_email_trim,
         )
         self.delete_page_btn = ttk.Button(
-            edit_buttons,
+            rotation_buttons,
             text="Delete Current Page",
             command=self.delete_current_page,
         )
@@ -262,7 +268,14 @@ class PreviewWindow:
         ttk.Button(output_buttons, text="Back to Files", command=self.close).pack(side=tk.RIGHT, padx=4, pady=4)
 
         self.edit_var = tk.StringVar(value="")
-        ttk.Label(self.preview_view, textvariable=self.edit_var, padding=(12, 0, 12, 8)).pack(anchor="w")
+        ttk.Label(self.footer, textvariable=self.edit_var, padding=(12, 0, 12, 8)).pack(anchor="w")
+
+        window = self.parent.winfo_toplevel()
+        window.update_idletasks()
+        window.minsize(
+            max(640, buttons.winfo_reqwidth() + 16),
+            max(480, top.winfo_reqheight() + self.footer.winfo_reqheight() + 100),
+        )
 
     def _render_page(self) -> None:
         self._cancel_edit_mode()
