@@ -53,7 +53,8 @@ class OfficeConverterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             source_path = Path(temp_dir) / "memo.pdf"
             source = fitz.open()
-            source.new_page(width=612, height=792)
+            page = source.new_page(width=612, height=792)
+            page.insert_text((20, 30), "Printable Outlook memo")
             source.save(source_path)
             source.close()
 

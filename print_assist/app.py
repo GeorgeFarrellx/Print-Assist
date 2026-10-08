@@ -41,6 +41,7 @@ from .zip_renamer import ZipExtractionWarning, default_extracted_folder_path, re
 
 if TYPE_CHECKING:
     from .preview_window import PreviewWindow
+    from .pdf_split_window import PdfSplitWindow
 
 SORT_MANUAL = "Manual order"
 SORT_FILENAME = "File name (A–Z)"
@@ -368,6 +369,7 @@ class PrintAssistApp:
         self._preview_queue: queue.Queue[tuple[str, object]] | None = None
         self._preview_temp_dir_obj: tempfile.TemporaryDirectory[str] | None = None
         self._preview_view: PreviewWindow | None = None
+        self._split_window: PdfSplitWindow | None = None
         self._main_window_geometry = MAIN_WINDOW_GEOMETRY
         self._main_window_minsize = self.root.minsize()
         self._outlook_drop_temp_dir_obj: tempfile.TemporaryDirectory[str] | None = None
@@ -443,7 +445,7 @@ class PrintAssistApp:
         button_groups = [
             [("Add Files", self.add_files)],
             [("Remove Selected", self.remove_selected), ("Move Up", self.move_up), ("Move Down", self.move_down), ("Clear", self.clear_files)],
-            [("Preview Print Assist PDF", self.create_preview), ("Rename + Extract ZIP", self.rename_zip_contents)],
+            [("Preview Print Assist PDF", self.create_preview), ("Split PDF", self.split_pdf), ("Rename + Extract ZIP", self.rename_zip_contents)],
         ]
 
         self.buttons: dict[str, ttk.Button] = {}
@@ -932,6 +934,7 @@ class PrintAssistApp:
             "Move Down",
             "Clear",
             "Preview Print Assist PDF",
+            "Split PDF",
             "Rename + Extract ZIP",
         ]
         state = tk.NORMAL if enabled else tk.DISABLED
@@ -1088,6 +1091,36 @@ class PrintAssistApp:
         threading.Thread(target=worker, daemon=True).start()
         self.root.after(100, self._poll_preview_queue)
 
+    def split_pdf(self) -> None:
+        if self._preview_running:
+            return
+        if self._split_window is not None:
+            self._split_window.window.lift()
+            return
+        selected = self._selected_tree_paths()
+        if len(selected) == 1 and selected[0].suffix.lower() == ".pdf":
+            source_path = selected[0]
+        else:
+            chosen = filedialog.askopenfilename(
+                parent=self.root,
+                title="Choose PDF to split",
+                initialdir=str(self._default_picker_directory()),
+                filetypes=[("PDF files", "*.pdf")],
+            )
+            if not chosen:
+                return
+            source_path = Path(chosen)
+
+        from .pdf_split_window import PdfSplitWindow
+
+        def on_export(result) -> None:
+            self.status_var.set(f"Split PDF: saved {len(result.files)} files in {result.folder}")
+
+        def on_close() -> None:
+            self._split_window = None
+
+        self._split_window = PdfSplitWindow(self.root, source_path, on_export, on_close)
+
     def rename_zip_contents(self) -> None:
         selected_zips = [
             path for path in self._selected_tree_paths() if path.suffix.lower() in ZIP_EXTENSIONS
@@ -1168,6 +1201,8 @@ class PrintAssistApp:
             subprocess.run(["xdg-open", str(path)], check=False)
 
     def _on_close(self) -> None:
+        if self._split_window is not None and not self._split_window.close():
+            return
         if self._preview_view is not None:
             self._preview_view.close()
         self._teardown_native_windows_drop_target()
