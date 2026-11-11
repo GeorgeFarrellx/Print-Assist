@@ -105,6 +105,21 @@ Windows bundles also support creating a shortcut. Keep the complete folder toget
 - External PDF printing depends on Windows/default PDF print handling behavior.
 - Printer selection, duplex, tray selection, paper selection, and other advanced print options are not implemented yet.
 
+## Rename and extract ZIP files
+
+**Rename + Extract ZIP** gives files short names such as `A1.docx` and
+`A2.pdf`, keeps their folders, and writes `Name_Mapping.csv` to record the
+original names. File contents remain unchanged.
+
+The complete output path, including all folders, must fit within the Windows
+and Office limit of 259 characters. Print Assist checks the renamed paths before
+extracting anything. If the destination is too deep, it explains the problem
+and lets you choose a shorter extraction folder. Cancelling keeps any earlier
+completed ZIP extractions.
+
+If an older extraction will not open in Word or Explorer preview, move its
+files to a shorter folder. Short filenames alone do not fix long folder paths.
+
 ## Split PDFs for a converter
 
 1. Select a PDF in the file list and click **Split PDF**, or click **Split PDF** and choose a file.

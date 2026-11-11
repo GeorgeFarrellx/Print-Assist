@@ -37,7 +37,13 @@ from .windows_drop import (
     register_drop_target,
     revoke_drop_target,
 )
-from .zip_renamer import ZipExtractionWarning, default_extracted_folder_path, rename_and_extract_zip_contents, unique_folder_path
+from .zip_renamer import (
+    ZipExtractionPathError,
+    ZipExtractionWarning,
+    default_extracted_folder_path,
+    rename_and_extract_zip_contents,
+    unique_folder_path,
+)
 
 if TYPE_CHECKING:
     from .preview_window import PreviewWindow
@@ -1151,41 +1157,39 @@ class PrintAssistApp:
         errors: list[str] = []
         warnings: list[str] = []
 
-        if len(zip_files) == 1:
-            source_zip = zip_files[0]
-            selected_output = filedialog.askdirectory(
-                title="Choose extraction folder",
-                initialdir=str(source_zip.parent),
-            )
-            if not selected_output:
-                self.status_var.set("ZIP rename and extract cancelled.")
-                return
-            output_folder = unique_folder_path(default_extracted_folder_path(source_zip, Path(selected_output)))
-            try:
-                outputs.append(rename_and_extract_zip_contents(source_zip, output_folder))
-            except ZipExtractionWarning as exc:
-                outputs.append(exc.output_folder)
-                warnings.append(f"{source_zip.name}: {exc}")
-            except Exception as exc:
-                errors.append(f"{source_zip.name}: {exc}")
-        else:
-            selected_output = filedialog.askdirectory(
-                title="Choose parent extraction folder",
-                initialdir=str(zip_files[0].parent),
-            )
-            if not selected_output:
-                self.status_var.set("ZIP rename and extract cancelled.")
-                return
-            parent_output = Path(selected_output)
-            for source_zip in zip_files:
+        selected_output = filedialog.askdirectory(
+            title="Choose extraction folder" if len(zip_files) == 1 else "Choose parent extraction folder",
+            initialdir=str(zip_files[0].parent),
+        )
+        if not selected_output:
+            self.status_var.set("ZIP rename and extract cancelled.")
+            return
+        parent_output = Path(selected_output)
+        cancelled = False
+        for source_zip in zip_files:
+            while True:
                 output_folder = unique_folder_path(default_extracted_folder_path(source_zip, parent_output))
                 try:
                     outputs.append(rename_and_extract_zip_contents(source_zip, output_folder))
+                except ZipExtractionPathError as exc:
+                    messagebox.showerror(APP_NAME, str(exc))
+                    selected_output = filedialog.askdirectory(
+                        title="Choose a shorter extraction folder",
+                        initialdir=str(parent_output),
+                    )
+                    if not selected_output:
+                        cancelled = True
+                        break
+                    parent_output = Path(selected_output)
+                    continue
                 except ZipExtractionWarning as exc:
                     outputs.append(exc.output_folder)
                     warnings.append(f"{source_zip.name}: {exc}")
                 except Exception as exc:
                     errors.append(f"{source_zip.name}: {exc}")
+                break
+            if cancelled:
+                break
 
         if outputs:
             output_text = "\n".join(str(p) for p in outputs)
@@ -1199,6 +1203,9 @@ class PrintAssistApp:
         if errors:
             self.status_var.set("Some ZIP files could not be renamed and extracted.")
             messagebox.showerror(APP_NAME, "ZIP rename and extract errors:\n" + "\n".join(errors))
+
+        if cancelled:
+            self.status_var.set("ZIP rename and extract cancelled; any completed extractions have been kept.")
 
     def open_output_folder(self) -> None:
         if self.output_path and self.output_path.parent.exists():

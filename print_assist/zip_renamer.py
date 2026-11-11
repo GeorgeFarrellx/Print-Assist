@@ -6,6 +6,22 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 
+WINDOWS_MAX_PATH_LENGTH = 259  # MAX_PATH minus the terminating null character.
+
+
+class ZipExtractionPathError(ValueError):
+    def __init__(self, output_folder: Path, longest_path: Path) -> None:
+        self.output_folder = output_folder
+        self.longest_path = longest_path
+        super().__init__(
+            "The extraction destination would create a path that Windows previews "
+            f"and Microsoft Office cannot open ({_windows_path_length(longest_path)} "
+            f"characters; maximum {WINDOWS_MAX_PATH_LENGTH}):\n{longest_path}\n\n"
+            "Choose an extraction folder closer to the drive root. "
+            "No files have been extracted from this ZIP."
+        )
+
+
 class ZipExtractionWarning(Exception):
     def __init__(self, output_folder: Path, unsafe_paths: list[str]) -> None:
         self.output_folder = output_folder
@@ -119,7 +135,6 @@ def rename_zip_contents(source_zip: Path, output_zip: Path) -> Path:
 def rename_and_extract_zip_contents(source_zip: Path, output_folder: Path) -> Path:
     source_zip = Path(source_zip)
     output_folder = Path(output_folder)
-    output_folder.mkdir(parents=True, exist_ok=False)
     output_root = output_folder.resolve()
 
     mapping_rows: list[dict[str, str]] = []
@@ -127,6 +142,8 @@ def rename_and_extract_zip_contents(source_zip: Path, output_folder: Path) -> Pa
     sequence = 0
 
     with zipfile.ZipFile(source_zip, "r") as source:
+        _check_extraction_path_lengths(source, output_root)
+        output_folder.mkdir(parents=True, exist_ok=False)
         for info in source.infolist():
             original_path = _safe_zip_path(info.filename)
             if original_path is None:
@@ -169,6 +186,46 @@ def rename_and_extract_zip_contents(source_zip: Path, output_folder: Path) -> Pa
     return output_folder
 
 
+def _windows_path_length(path: Path) -> int:
+    # Python can access extended paths, but Word and Explorer still use MAX_PATH.
+    text = str(path.absolute())
+    if text.startswith("\\\\?\\UNC\\"):
+        text = "\\\\" + text[8:]
+    elif text.startswith("\\\\?\\"):
+        text = text[4:]
+    return len(text.encode("utf-16-le")) // 2
+
+
+def _check_extraction_path_lengths(source: zipfile.ZipFile, output_root: Path) -> None:
+    longest_path = output_root / "Name_Mapping.csv"
+    occupied_paths: set[Path] = set()
+    sequence = 0
+    for info in source.infolist():
+        original_path = _safe_zip_path(info.filename)
+        if original_path is None:
+            continue
+        if info.is_dir():
+            relative_path = original_path
+        else:
+            sequence += 1
+            relative_path = original_path.with_name(
+                f"{short_name_for_sequence(sequence)}{original_path.suffix}"
+            )
+        target = _safe_output_path(output_root, relative_path)
+        if not info.is_dir():
+            target = _unique_file_path(target, occupied_paths)
+        occupied_paths.add(target)
+        occupied_paths.update(target.parents)
+        if _windows_path_length(target) > _windows_path_length(longest_path):
+            longest_path = target
+
+    mapping_path = _unique_file_path(output_root / "Name_Mapping.csv", occupied_paths)
+    if _windows_path_length(mapping_path) > _windows_path_length(longest_path):
+        longest_path = mapping_path
+    if _windows_path_length(longest_path) > WINDOWS_MAX_PATH_LENGTH:
+        raise ZipExtractionPathError(output_root, longest_path)
+
+
 def _safe_zip_path(filename: str) -> PurePosixPath | None:
     path = PurePosixPath(filename)
     if path.is_absolute() or any(part in ("", "..") for part in path.parts):
@@ -184,14 +241,17 @@ def _safe_output_path(output_root: Path, zip_path: PurePosixPath) -> Path:
     return target
 
 
-def _unique_file_path(path: Path) -> Path:
-    if not path.exists():
+def _unique_file_path(path: Path, occupied_paths: set[Path] | None = None) -> Path:
+    def is_occupied(candidate: Path) -> bool:
+        return candidate.exists() or (occupied_paths is not None and candidate in occupied_paths)
+
+    if not is_occupied(path):
         return path
 
     counter = 2
     while True:
         candidate = path.with_name(f"{path.stem} ({counter}){path.suffix}")
-        if not candidate.exists():
+        if not is_occupied(candidate):
             return candidate
         counter += 1
 
